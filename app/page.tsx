@@ -17,11 +17,11 @@ const TIME_SLOTS = [
 const MONTHS_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const WEEKDAYS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
-const getDaysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
-const getFirstDay    = (y, m) => new Date(y, m, 1).getDay();
+const getDaysInMonth = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
+const getFirstDay    = (y: number, m: number) => new Date(y, m, 1).getDay();
 const today          = new Date();
-const fmtDate        = (day, month) => `${String(day).padStart(2,'0')} de ${MONTHS_PT[month]}`;
-const toDateStr      = (day, month, year) => `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+const fmtDate        = (day: number, month: number) => `${String(day).padStart(2,'0')} de ${MONTHS_PT[month]}`;
+const toDateStr      = (day: number, month: number, year: number) => `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 
 // ─── CSS ─────────────────────────────────────────────────────────────────────
 const CSS = `
