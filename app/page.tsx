@@ -847,7 +847,7 @@ function FaturamentoScreen({ barber, onClose }) {
                   Seu repasse {periodLabel[period]}
                 </div>
                 <div style={{fontSize:'2.2rem',fontWeight:700,color:'#4ade80',lineHeight:1}}>
-                  R$ {totalRepasse.toFixed(0)}
+                  R$ {totalRepasse.toFixed(2).replace(".", ",")}
                 </div>
                 <div style={{color:'rgba(74,222,128,0.5)',fontSize:'0.78rem',marginTop:'0.4rem'}}>
                   50% seg–sáb · 60% domingos
@@ -1018,10 +1018,6 @@ function AvulsoTab({ barber }) {
           <div className="field-label">Nome</div>
           <input className="field-input" placeholder="Nome do cliente" value={clientName} onChange={e=>setClientName(e.target.value)} />
         </div>
-        <div className="field-wrap">
-          <div className="field-label">Telefone</div>
-          <input className="field-input" placeholder="(00) 00000-0000" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} />
-        </div>
         <div className="field-wrap" style={{marginBottom:0}}>
           <div className="field-label">Desconto (R$) <span style={{color:'var(--dim)',fontWeight:400,textTransform:'none',letterSpacing:0}}>— opcional</span></div>
           <div style={{position:'relative'}}>
@@ -1084,7 +1080,7 @@ function Dashboard({ barber, onLogout }) {
       <div className="tabs">
         <button className={`tab-btn ${tab==='agenda'?'active':''}`}  onClick={()=>setTab('agenda')}>📅 Agenda</button>
         <button className={`tab-btn ${tab==='novo'?'active':''}`}    onClick={()=>setTab('novo')}>+ Novo</button>
-        <button className={`tab-btn ${tab==='avulso'?'active':''}`}  onClick={()=>setTab('avulso')}>⚡ Avulso</button>
+        <button className={`tab-btn ${tab==='avulso'?'active':''}`}  onClick={()=>setTab('avulso')}>⚡ Atend.</button>
       </div>
       <div className="tab-content">
         {tab==='agenda' ? <AgendaTab barber={barber}/>
