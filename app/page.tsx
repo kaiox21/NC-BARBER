@@ -18,6 +18,15 @@ const TIME_SLOTS = [
 const MONTHS_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const WEEKDAYS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
+// Emails dos funcionários (recebem repasse)
+const FUNCIONARIOS = ['juninduamassa7@gmail.com', 'kauanzinxl90@gmail.com', 'kaioxavier50@gmail.com'];
+const getRepasse = (total: number, dateStr: string) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const diaSemana = new Date(y, m - 1, d).getDay(); // 0 = domingo
+  const pct = diaSemana === 0 ? 0.6 : 0.5;
+  return total * pct;
+};
+
 const getDaysInMonth = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
 const getFirstDay    = (y: number, m: number) => new Date(y, m, 1).getDay();
 const today          = new Date();
@@ -747,13 +756,15 @@ function FaturamentoScreen({ barber, onClose }) {
     return { start, end };
   };
 
+  const isFuncionario = FUNCIONARIOS.includes(barber.email);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const { start, end } = getRange();
       const { data: rows } = await supabase
         .from('agendamentos')
-        .select('data, total, status')
+        .select('data, total, status, desconto')
         .eq('barbeiro_id', barber.id)
         .eq('status', 'concluido')
         .gte('data', start)
@@ -767,6 +778,10 @@ function FaturamentoScreen({ barber, onClose }) {
 
   const totalFaturado = data.reduce((sum, r) => sum + Number(r.total), 0);
   const totalAtend    = data.length;
+  // Repasse calculado sobre valor cheio (total + desconto)
+  const totalRepasse  = isFuncionario
+    ? data.reduce((sum, r) => sum + getRepasse(Number(r.total) + Number(r.desconto || 0), r.data), 0)
+    : 0;
   const byDay = data.reduce((acc, r) => { acc[r.data] = (acc[r.data]||0)+Number(r.total); return acc; }, {});
   const dias  = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
   const maxVal = Math.max(...dias.map(([,v]) => v), 1);
@@ -826,6 +841,20 @@ function FaturamentoScreen({ barber, onClose }) {
                 <div className="fat-stat-value">{totalAtend}</div>
               </div>
             </div>
+
+            {isFuncionario && (
+              <div style={{background:'#0d1a0d',border:'1px solid rgba(74,222,128,0.2)',borderRadius:'var(--radius)',padding:'1.2rem',marginBottom:'1rem',textAlign:'center'}}>
+                <div style={{fontSize:'0.7rem',fontWeight:600,letterSpacing:'0.12em',textTransform:'uppercase',color:'#4ade80',marginBottom:'0.4rem',opacity:0.7}}>
+                  Seu repasse {periodLabel[period]}
+                </div>
+                <div style={{fontSize:'2.2rem',fontWeight:700,color:'#4ade80',lineHeight:1}}>
+                  R$ {totalRepasse.toFixed(0)}
+                </div>
+                <div style={{color:'rgba(74,222,128,0.5)',fontSize:'0.78rem',marginTop:'0.4rem'}}>
+                  50% seg–sáb · 60% domingos
+                </div>
+              </div>
+            )}
 
             <div className="card-block">
               <div className="card-block-title">Faturamento por dia</div>
