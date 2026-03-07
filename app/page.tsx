@@ -18,7 +18,7 @@ const MONTHS_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho'
 const WEEKDAYS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
 // Emails dos funcionários (recebem repasse)
-const FUNCIONARIOS = ['juninduamassa7@gmail.com', 'kauanzinxl90@gmail.com'];
+const FUNCIONARIOS = ['juninduamassa7@gmail.com', 'kauanzinxl90@gmail.com', 'kaioxavier50@gmail.com'];
 const getRepasse = (total: number, dateStr: string) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   const diaSemana = new Date(y, m - 1, d).getDay(); // 0 = domingo
