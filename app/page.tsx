@@ -13,13 +13,12 @@ const TIME_SLOTS = [
   '08:00','08:30','09:00','09:30','10:00','10:30',
   '11:00','11:30','13:00','13:30','14:00','14:30',
   '15:00','15:30','16:00','16:30','17:00','17:30',
-  '18:00','18:30','19:00','19:30','20:00',
 ];
 const MONTHS_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const WEEKDAYS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
 // Emails dos funcionários (recebem repasse)
-const FUNCIONARIOS = ['juninduamassa7@gmail.com', 'kauanzinxl90@gmail.com', 'kaioxavier50@gmail.com'];
+const FUNCIONARIOS = ['juninduamassa7@gmail.com', 'kauanzinxl90@gmail.com'];
 const getRepasse = (total: number, dateStr: string) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   const diaSemana = new Date(y, m - 1, d).getDay(); // 0 = domingo
@@ -880,6 +879,186 @@ function FaturamentoScreen({ barber, onClose }) {
   );
 }
 
+
+// ─── Atendimento Avulso ───────────────────────────────────────────────────────
+function AvulsoTab({ barber }) {
+  const [selServices, setSelServices] = useState([]);
+  const [clientName, setClientName]   = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [desconto, setDesconto]       = useState('');
+  const [services, setServices]       = useState([]);
+  const [loadingSvcs, setLoadingSvcs] = useState(true);
+  const [saving, setSaving]           = useState(false);
+  const [done, setDone]               = useState(false);
+  const [savedData, setSavedData]     = useState(null);
+
+  useEffect(() => {
+    supabase.from('servicos').select('*').eq('ativo', true).order('id')
+      .then(({ data }) => { setServices(data ?? []); setLoadingSvcs(false); });
+  }, []);
+
+  const toggleSvc     = (s) => setSelServices(p => p.find(x=>x.id===s.id) ? p.filter(x=>x.id!==s.id) : [...p,s]);
+  const isSelSvc      = (s) => !!selServices.find(x=>x.id===s.id);
+  const subtotal      = selServices.reduce((sum,s)=>sum+Number(s.preco),0);
+  const descontoVal   = Math.min(Number(desconto)||0, subtotal);
+  const totalPrice    = subtotal - descontoVal;
+  const totalDuration = selServices.reduce((sum,s)=>sum+s.duracao,0);
+  const canConfirm    = selServices.length>0 && clientName;
+
+  const handleConfirm = async () => {
+    if (!canConfirm || saving) return;
+    setSaving(true);
+    try {
+      const now     = new Date();
+      const pad     = (n) => String(n).padStart(2,'0');
+      const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+      const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:00`;
+
+      const { data: appt, error: apptErr } = await supabase
+        .from('agendamentos')
+        .insert({
+          barbeiro_id:   barber.id,
+          cliente_nome:  clientName,
+          cliente_fone:  clientPhone || null,
+          data:          dateStr,
+          horario:       timeStr,
+          total:         totalPrice,
+          duracao_total: totalDuration,
+          desconto:      descontoVal,
+          status:        'concluido', // já entra como concluído
+        })
+        .select().single();
+      if (apptErr) throw apptErr;
+
+      const { error: svcsErr } = await supabase.from('agendamento_servicos').insert(
+        selServices.map(s => ({ agendamento_id:appt.id, servico_id:s.id, preco_cobrado:s.preco }))
+      );
+      if (svcsErr) throw svcsErr;
+
+      setSavedData({ clientName, selServices, totalPrice, descontoVal, subtotal });
+      setDone(true);
+    } catch (err) {
+      alert('Erro ao salvar. Tente novamente.');
+      console.error(err);
+    } finally { setSaving(false); }
+  };
+
+  const handleNew = () => {
+    setSelServices([]); setClientName(''); setClientPhone('');
+    setDesconto(''); setDone(false); setSavedData(null);
+  };
+
+  if (done && savedData) return (
+    <div className="success-wrap">
+      <div className="success-check">⚡</div>
+      <div style={{fontWeight:700,fontSize:'1.2rem',marginBottom:'0.3rem'}}>Registrado!</div>
+      <div style={{color:'var(--muted)',fontSize:'0.88rem',marginBottom:'1.5rem'}}>
+        {savedData.clientName} · já no caixa
+      </div>
+      <div className="summary-block" style={{textAlign:'left',maxWidth:320,margin:'0 auto 1.5rem'}}>
+        {savedData.selServices.map(s=>(
+          <div key={s.id} className="sum-row">
+            <span className="sum-key">{s.icone} {s.nome}</span>
+            <span className="sum-val">R$ {Number(s.preco).toFixed(0)}</span>
+          </div>
+        ))}
+        {savedData.descontoVal>0 && (
+          <>
+            <div className="sum-row"><span className="sum-key">Subtotal</span><span className="sum-val">R$ {savedData.subtotal},00</span></div>
+            <div className="sum-row"><span className="sum-key" style={{color:'#4ade80'}}>Desconto</span><span className="sum-val" style={{color:'#4ade80'}}>- R$ {savedData.descontoVal},00</span></div>
+          </>
+        )}
+        <div className="sum-div"/>
+        <div className="sum-row"><span className="sum-total-key">Total</span><span className="sum-total-val">R$ {savedData.totalPrice},00</span></div>
+      </div>
+      <button className="btn-gold" style={{maxWidth:280,margin:'0 auto',display:'block'}} onClick={handleNew}>
+        + Novo atendimento
+      </button>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Serviços */}
+      <div className="card-block">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.9rem'}}>
+          <div className="card-block-title" style={{margin:0}}>Serviços</div>
+          {selServices.length>0 && (
+            <span style={{fontSize:'0.75rem',color:'var(--gold)',fontWeight:600}}>
+              {selServices.length} selecionado{selServices.length>1?'s':''}
+            </span>
+          )}
+        </div>
+        {loadingSvcs ? (
+          <div style={{display:'flex',justifyContent:'center',padding:'1rem'}}><Spinner /></div>
+        ) : services.map(s => {
+          const active = isSelSvc(s);
+          return (
+            <div key={s.id} className={`svc-card ${active?'active':''}`} onClick={()=>toggleSvc(s)}>
+              <div className="svc-left">
+                <div style={{width:20,height:20,borderRadius:6,border:`1.5px solid ${active?'var(--gold)':'var(--border2)'}`,background:active?'var(--gold)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all 0.12s'}}>
+                  {active && <span style={{color:'#000',fontSize:'0.7rem',fontWeight:900}}>✓</span>}
+                </div>
+                <span className="svc-icon">{s.icone}</span>
+                <div>
+                  <div className="svc-name">{s.nome}</div>
+                  <div className="svc-dur">{s.duracao} min</div>
+                </div>
+              </div>
+              <div className="svc-price">R$ {Number(s.preco).toFixed(0)}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Cliente */}
+      <div className="card-block">
+        <div className="card-block-title">Cliente</div>
+        <div className="field-wrap">
+          <div className="field-label">Nome</div>
+          <input className="field-input" placeholder="Nome do cliente" value={clientName} onChange={e=>setClientName(e.target.value)} />
+        </div>
+        <div className="field-wrap">
+          <div className="field-label">Telefone</div>
+          <input className="field-input" placeholder="(00) 00000-0000" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} />
+        </div>
+        <div className="field-wrap" style={{marginBottom:0}}>
+          <div className="field-label">Desconto (R$) <span style={{color:'var(--dim)',fontWeight:400,textTransform:'none',letterSpacing:0}}>— opcional</span></div>
+          <div style={{position:'relative'}}>
+            <span style={{position:'absolute',left:'0.9rem',top:'50%',transform:'translateY(-50%)',color:'var(--dim)',fontSize:'0.9rem',pointerEvents:'none'}}>R$</span>
+            <input className="field-input" style={{paddingLeft:'2.2rem'}} placeholder="0" type="number" min="0" value={desconto} onChange={e=>setDesconto(e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      {/* Resumo */}
+      {selServices.length>0 && (
+        <div className="summary-block">
+          {selServices.map(s=>(
+            <div key={s.id} className="sum-row">
+              <span className="sum-key">{s.icone} {s.nome}</span>
+              <span className="sum-val">R$ {Number(s.preco).toFixed(0)}</span>
+            </div>
+          ))}
+          {descontoVal>0 && (
+            <>
+              <div className="sum-row"><span className="sum-key">Subtotal</span><span className="sum-val">R$ {subtotal},00</span></div>
+              <div className="sum-row"><span className="sum-key" style={{color:'#4ade80'}}>Desconto</span><span className="sum-val" style={{color:'#4ade80'}}>- R$ {descontoVal},00</span></div>
+            </>
+          )}
+          <div className="sum-div"/>
+          <div className="sum-row"><span className="sum-total-key">Total</span><span className="sum-total-val">R$ {totalPrice},00</span></div>
+        </div>
+      )}
+
+      <button className="btn-gold" onClick={handleConfirm} disabled={!canConfirm||saving}>
+        {saving ? <><Spinner size={18} dark/> Salvando...</> : '⚡ Registrar Atendimento'}
+      </button>
+      <div className="bottom-pad"/>
+    </div>
+  );
+}
+
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 function Dashboard({ barber, onLogout }) {
   const [tab, setTab]       = useState('agenda');
@@ -903,11 +1082,14 @@ function Dashboard({ barber, onLogout }) {
         <div className="greeting-sub">{today.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})}</div>
       </div>
       <div className="tabs">
-        <button className={`tab-btn ${tab==='agenda'?'active':''}`} onClick={()=>setTab('agenda')}>📅 Agenda</button>
-        <button className={`tab-btn ${tab==='novo'?'active':''}`}   onClick={()=>setTab('novo')}>+ Novo</button>
+        <button className={`tab-btn ${tab==='agenda'?'active':''}`}  onClick={()=>setTab('agenda')}>📅 Agenda</button>
+        <button className={`tab-btn ${tab==='novo'?'active':''}`}    onClick={()=>setTab('novo')}>+ Novo</button>
+        <button className={`tab-btn ${tab==='avulso'?'active':''}`}  onClick={()=>setTab('avulso')}>⚡ Avulso</button>
       </div>
       <div className="tab-content">
-        {tab==='agenda' ? <AgendaTab barber={barber}/> : <NovoAgendamentoTab barber={barber}/>}
+        {tab==='agenda' ? <AgendaTab barber={barber}/>
+          : tab==='novo' ? <NovoAgendamentoTab barber={barber}/>
+          : <AvulsoTab barber={barber}/>}
       </div>
     </div>
   );
