@@ -13,13 +13,12 @@ const TIME_SLOTS = [
   '08:00','08:30','09:00','09:30','10:00','10:30',
   '11:00','11:30','13:00','13:30','14:00','14:30',
   '15:00','15:30','16:00','16:30','17:00','17:30',
-  '18:00','18:30','19:00','19:30','20:00'
 ];
 const MONTHS_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const WEEKDAYS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
 // Emails dos funcionários (recebem repasse)
-const FUNCIONARIOS = ['juninduamassa7@gmail.com', 'kaioxavier50@gmail.com', 'Kauanzinxl90@gmail.com'];
+const FUNCIONARIOS = ['juninduamassa7@gmail.com', 'kaioxavier50@gmail.com'];
 const getRepasse = (total: number, dateStr: string) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   const diaSemana = new Date(y, m - 1, d).getDay(); // 0 = domingo
@@ -263,7 +262,7 @@ function LoginScreen({ onLogin }) {
 }
 
 // ─── Modal de Agendamento ────────────────────────────────────────────────────
-function ApptModal({ appt, onClose, onStatusChange }) {
+function ApptModal({ appt, onClose, onStatusChange, onDelete }) {
   const [loading, setLoading] = useState(false);
 
   const updateStatus = async (status) => {
@@ -278,6 +277,23 @@ function ApptModal({ appt, onClose, onStatusChange }) {
       onClose();
     } catch (err) {
       alert('Erro ao atualizar. Tente novamente.');
+      console.error(err);
+    } finally { setLoading(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Tem certeza que deseja excluir este atendimento? Esta ação não pode ser desfeita.')) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('agendamentos')
+        .delete()
+        .eq('id', appt.id);
+      if (error) throw error;
+      onDelete(appt.id);
+      onClose();
+    } catch (err) {
+      alert('Erro ao excluir. Tente novamente.');
       console.error(err);
     } finally { setLoading(false); }
   };
@@ -316,6 +332,10 @@ function ApptModal({ appt, onClose, onStatusChange }) {
         )}
 
         <div className="modal-divider" style={{margin:'0.6rem 0'}}/>
+        <button className="modal-btn modal-btn-ghost" onClick={handleDelete} disabled={loading}
+          style={{color:'var(--red)',borderColor:'rgba(248,113,113,0.2)',marginBottom:'0.6rem'}}>
+          🗑 Excluir atendimento
+        </button>
         <button className="modal-btn modal-btn-ghost" onClick={onClose}>Fechar</button>
       </div>
     </div>
@@ -324,10 +344,10 @@ function ApptModal({ appt, onClose, onStatusChange }) {
 
 // ─── Agenda ──────────────────────────────────────────────────────────────────
 function AgendaTab({ barber }) {
-  const days = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(today); d.setDate(today.getDate() + i); return d;
+  const days = Array.from({ length: 22 }, (_, i) => {
+    const d = new Date(today); d.setDate(today.getDate() - 7 + i); return d;
   });
-  const [activeDayIdx, setActiveDayIdx] = useState(0);
+  const [activeDayIdx, setActiveDayIdx] = useState(7);
   const [agendamentos, setAgendamentos] = useState([]);
   const [loading, setLoading]           = useState(false);
   const [selectedAppt, setSelectedAppt] = useState(null);
@@ -351,6 +371,12 @@ function AgendaTab({ barber }) {
 
   useEffect(() => { fetchAgendamentos(); }, [fetchAgendamentos]);
 
+  // Scroll para hoje ao carregar
+  useEffect(() => {
+    const el = document.getElementById('date-chip-today');
+    if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, []);
+
   const handleStatusChange = (id, status) => {
     if (status === 'cancelado') {
       setAgendamentos(prev => prev.filter(a => a.id !== id));
@@ -368,12 +394,13 @@ function AgendaTab({ barber }) {
           appt={selectedAppt}
           onClose={() => setSelectedAppt(null)}
           onStatusChange={handleStatusChange}
+          onDelete={(id) => setAgendamentos(prev => prev.filter(a => a.id !== id))}
         />
       )}
 
       <div className="date-scroll">
         {days.map((d, i) => (
-          <div key={i} className={`date-chip ${activeDayIdx===i?'active':''}`} onClick={() => setActiveDayIdx(i)}>
+          <div key={i} id={i===7?'date-chip-today':undefined} className={`date-chip ${activeDayIdx===i?'active':''}`} onClick={() => setActiveDayIdx(i)}>
             <span className="dc-day">{WEEKDAYS[d.getDay()]}</span>
             <span className="dc-num">{d.getDate()}</span>
           </div>
