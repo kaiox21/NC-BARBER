@@ -13,6 +13,7 @@ const TIME_SLOTS = [
   '08:00','08:30','09:00','09:30','10:00','10:30',
   '11:00','11:30','13:00','13:30','14:00','14:30',
   '15:00','15:30','16:00','16:30','17:00','17:30',
+  '18:00','18:30','19:00','19:30','20:00',
 ];
 const MONTHS_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const WEEKDAYS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
@@ -807,7 +808,7 @@ function FaturamentoScreen({ barber, onClose }) {
   const totalAtend    = data.length;
   // Repasse calculado sobre valor cheio (total + desconto)
   const totalRepasse  = isFuncionario
-    ? data.reduce((sum, r) => sum + getRepasse(Number(r.total) + Number(r.desconto || 0), r.data), 0)
+    ? data.reduce((sum, r) => sum + getRepasse(Number(r.total), r.data), 0)
     : 0;
   const byDay = data.reduce((acc, r) => { acc[r.data] = (acc[r.data]||0)+Number(r.total); return acc; }, {});
   const dias  = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
