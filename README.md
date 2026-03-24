@@ -4,18 +4,16 @@ Sistema SaaS completo de gestão para barbearia, desenvolvido do zero com foco e
 
 🔗 **[Acesse o sistema ao vivo](https://nc-barber-v3l8.vercel.app)**
 
+---
+
+## 📸 Screenshots
+
 ![Image](https://github.com/user-attachments/assets/05446ee1-6f9b-4ec9-8ebe-5e4ee6bd0881) 
 ![Image](https://github.com/user-attachments/assets/52fecaae-4b82-4046-8095-a07dfdf9ec0d)
 ![Image](https://github.com/user-attachments/assets/b75a4eb7-7b43-41a2-964f-e7646a7afc2e)
 ![Image](https://github.com/user-attachments/assets/e678258b-a2bf-434c-9b2b-2842377f7bd4)
 ![Image](https://github.com/user-attachments/assets/f301e271-ccfe-41f6-bdcd-0fad36d9d1f0)
 ![Image](https://github.com/user-attachments/assets/fe829503-8ee0-4199-b259-22f18cca5f1b)
-
-
----
-
-## 📸 Screenshots
-
 
 ---
 
