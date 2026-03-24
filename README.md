@@ -19,7 +19,7 @@ Sistema SaaS completo de gestão para barbearia, desenvolvido do zero com foco e
 
 ## Sobre o projeto
 
-O NC Barber nasceu de uma necessidade real: uma barbearia precisava de um sistema simples para organizar a agenda dos barbeiros, controlar o caixa e calcular automaticamente o repasse de cada funcionário — tudo pelo celular, sem depender de planilhas ou anotações no papel.
+O NC Barber nasceu de uma necessidade real: uma barbearia precisava de um sistema simples para organizar a agenda dos barbeiros, controlar o caixa e calcular automaticamente o repasse de cada funcionário tudo pelo celular, sem depender de planilhas ou anotações no papel.
 
 O sistema está em uso ativo por 3 barbeiros, com agendamentos diários, atendimentos avulsos e fechamento de caixa no final do dia.
 
@@ -70,7 +70,7 @@ Next.js facilita o deploy na Vercel com zero configuração e oferece melhor per
 Auth + banco de dados + Row Level Security em um único serviço. A RLS garante que cada barbeiro acessa apenas seus próprios agendamentos diretamente no banco, sem precisar de middleware. Isso elimina uma camada inteira de lógica de permissão no código.
 
 **Por que separar agendamento de atendimento avulso?**
-Na prática, nem todo cliente agenda com antecedência. O fluxo avulso permite que o barbeiro registre um atendimento em poucos segundos — sem preencher data, hora e calendário — e o valor já cai direto no caixa como concluído.
+Na prática, nem todo cliente agenda com antecedência. O fluxo avulso permite que o barbeiro registre um atendimento em poucos segundos sem preencher data, hora e calendário e o valor já cai direto no caixa como concluído.
 
 **Repasse automático por dia da semana**
 O cálculo considera o dia da semana do atendimento, não do fechamento. Isso evita erros quando o barbeiro fecha o caixa depois da meia-noite ou revisa atendimentos de dias anteriores.
