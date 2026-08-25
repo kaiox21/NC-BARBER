@@ -20,11 +20,33 @@ const WEEKDAYS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
 // Emails dos funcionários (recebem repasse)
 const FUNCIONARIOS = ['juninduamassa7@gmail.com', 'kaioxavier50@gmail.com', 'kauanzinxl90@gmail.com', 'carlos@gmail.com'];
-const getRepasse = (total: number, dateStr: string) => {
+
+// Percentual padrão de repasse
+const REPASSE_PADRAO = { semana: 0.5, domingo: 0.6 };
+
+// Percentuais negociados individualmente, com vigência a partir de `desde` (inclusive).
+// Atendimentos anteriores a essa data continuam no percentual anterior — o repasse é
+// derivado na renderização, então sem a data de corte a mudança valeria retroativamente.
+const REPASSE_REGRAS: Record<string, { desde: string; semana: number; domingo: number }[]> = {
+  'juninduamassa7@gmail.com': [
+    { desde: '2026-08-24', semana: 0.55, domingo: 0.65 },
+  ],
+};
+
+// Regra vigente = a de maior `desde` que já começou na data do atendimento.
+const getPctRepasse = (email: string, dateStr: string) => {
+  const regras = REPASSE_REGRAS[(email ?? '').toLowerCase()] ?? [];
+  const vigentes = regras
+    .filter(r => dateStr >= r.desde)
+    .sort((a, b) => a.desde.localeCompare(b.desde));
+  return vigentes.length ? vigentes[vigentes.length - 1] : REPASSE_PADRAO;
+};
+
+const getRepasse = (total: number, dateStr: string, email: string) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   const diaSemana = new Date(y, m - 1, d).getDay(); // 0 = domingo
-  const pct = diaSemana === 0 ? 0.6 : 0.5;
-  return total * pct;
+  const { semana, domingo } = getPctRepasse(email, dateStr);
+  return total * (diaSemana === 0 ? domingo : semana);
 };
 
 const getDaysInMonth = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
@@ -808,7 +830,7 @@ function FaturamentoScreen({ barber, onClose }) {
   const totalAtend    = data.length;
   // Repasse calculado sobre valor cheio (total + desconto)
   const totalRepasse  = isFuncionario
-    ? data.reduce((sum, r) => sum + getRepasse(Number(r.total), r.data), 0)
+    ? data.reduce((sum, r) => sum + getRepasse(Number(r.total), r.data, barber.email), 0)
     : 0;
   const byDay = data.reduce((acc, r) => { acc[r.data] = (acc[r.data]||0)+Number(r.total); return acc; }, {});
   const dias  = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
@@ -823,6 +845,9 @@ function FaturamentoScreen({ barber, onClose }) {
   };
 
   const periodLabel = { dia:'hoje', semana:'esta semana', mes:'este mês' };
+
+  // Percentual em vigor hoje, para a legenda do card de repasse
+  const pctHoje = getPctRepasse(barber.email, toDateStr(today.getDate(), today.getMonth(), today.getFullYear()));
 
   return (
     <div className="fat-screen">
@@ -879,7 +904,7 @@ function FaturamentoScreen({ barber, onClose }) {
                   R$ {totalRepasse.toFixed(2).replace(".", ",")}
                 </div>
                 <div style={{color:'rgba(74,222,128,0.5)',fontSize:'0.78rem',marginTop:'0.4rem'}}>
-                  50% seg–sáb · 60% domingos
+                  {Math.round(pctHoje.semana*100)}% seg–sáb · {Math.round(pctHoje.domingo*100)}% domingos
                 </div>
               </div>
             )}
