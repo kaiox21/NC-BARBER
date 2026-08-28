@@ -216,6 +216,17 @@ const CSS = `
   .fat-screen-content { flex:1; overflow-y:auto; padding:1.2rem; }
   .topbar-fat-btn { padding:0.3rem 0.7rem; border-radius:999px; border:1.5px solid var(--border2); background:transparent; color:var(--muted); font-size:0.75rem; font-family:var(--font); cursor:pointer; transition:all 0.15s; }
   .topbar-fat-btn:hover { border-color:var(--gold); color:var(--gold); }
+  .barber-scroll { display:flex; gap:0.45rem; overflow-x:auto; padding-bottom:0.5rem; margin-bottom:0.8rem; scrollbar-width:none; }
+  .barber-scroll::-webkit-scrollbar { display:none; }
+  .barber-scroll .chip { flex-shrink:0; white-space:nowrap; }
+  .barber-row { display:flex; align-items:center; gap:0.8rem; padding:0.75rem 0; border-bottom:1px solid var(--border); cursor:pointer; }
+  .barber-row:last-child { border-bottom:none; }
+  .barber-row-name { font-weight:600; font-size:0.9rem; }
+  .barber-row-sub { color:var(--dim); font-size:0.75rem; margin-top:0.15rem; }
+  .adv-row { display:flex; justify-content:space-between; align-items:center; gap:0.6rem; padding:0.55rem 0; border-bottom:1px solid var(--border); font-size:0.85rem; }
+  .adv-row:last-child { border-bottom:none; }
+  .adv-del { background:transparent; border:none; color:var(--red); cursor:pointer; font-size:0.95rem; padding:0.2rem 0.4rem; opacity:0.7; }
+  .adv-del:hover { opacity:1; }
 `;
 
 function Spinner({ size = 20, dark = false }) {
@@ -285,7 +296,8 @@ function LoginScreen({ onLogin }) {
 }
 
 // ─── Modal de Agendamento ────────────────────────────────────────────────────
-function ApptModal({ appt, onClose, onStatusChange, onDelete }) {
+// `readOnly`: admin vendo atendimento de outro barbeiro — só visualiza, não altera.
+function ApptModal({ appt, onClose, onStatusChange, onDelete, readOnly = false, barberName = null }) {
   const [loading, setLoading] = useState(false);
 
   const updateStatus = async (status) => {
@@ -327,7 +339,7 @@ function ApptModal({ appt, onClose, onStatusChange, onDelete }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-title">{appt.cliente_nome}</div>
-        <div className="modal-sub">{appt.horario?.slice(0,5)} · R$ {Number(appt.total).toFixed(0)}</div>
+        <div className="modal-sub">{appt.horario?.slice(0,5)} · R$ {Number(appt.total).toFixed(0)}{barberName ? ` · ✂️ ${barberName}` : ''}</div>
 
         <div style={{display:'flex',flexWrap:'wrap',gap:'0.35rem',marginBottom:'0.8rem'}}>
           {svcs.map((as, i) => (
@@ -338,7 +350,14 @@ function ApptModal({ appt, onClose, onStatusChange, onDelete }) {
 
         <div className="modal-divider"/>
 
-        {appt.status === 'confirmado' && (
+        {readOnly && (
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.8rem'}}>
+            <span style={{color:'var(--dim)',fontSize:'0.8rem'}}>Somente visualização</span>
+            <span className={`status-badge status-${appt.status}`}>{appt.status}</span>
+          </div>
+        )}
+
+        {!readOnly && appt.status === 'confirmado' && (
           <>
             <button className="modal-btn modal-btn-green" onClick={() => updateStatus('concluido')} disabled={loading}>
               {loading ? <Spinner size={16} /> : '✓ Marcar como concluído'}
@@ -348,17 +367,21 @@ function ApptModal({ appt, onClose, onStatusChange, onDelete }) {
             </button>
           </>
         )}
-        {appt.status === 'concluido' && (
+        {!readOnly && appt.status === 'concluido' && (
           <button className="modal-btn modal-btn-red" onClick={() => updateStatus('cancelado')} disabled={loading}>
             {loading ? <Spinner size={16} /> : '✕ Cancelar agendamento'}
           </button>
         )}
 
-        <div className="modal-divider" style={{margin:'0.6rem 0'}}/>
-        <button className="modal-btn modal-btn-ghost" onClick={handleDelete} disabled={loading}
-          style={{color:'var(--red)',borderColor:'rgba(248,113,113,0.2)',marginBottom:'0.6rem'}}>
-          🗑 Excluir atendimento
-        </button>
+        {!readOnly && (
+          <>
+            <div className="modal-divider" style={{margin:'0.6rem 0'}}/>
+            <button className="modal-btn modal-btn-ghost" onClick={handleDelete} disabled={loading}
+              style={{color:'var(--red)',borderColor:'rgba(248,113,113,0.2)',marginBottom:'0.6rem'}}>
+              🗑 Excluir atendimento
+            </button>
+          </>
+        )}
         <button className="modal-btn modal-btn-ghost" onClick={onClose}>Fechar</button>
       </div>
     </div>
@@ -366,31 +389,37 @@ function ApptModal({ appt, onClose, onStatusChange, onDelete }) {
 }
 
 // ─── Agenda ──────────────────────────────────────────────────────────────────
-function AgendaTab({ barber }) {
+// `barbeiros`: lista completa, só vem preenchida para o admin (Dashboard).
+function AgendaTab({ barber, barbeiros = [] }) {
+  const isAdmin = !!barber.admin;
   const days = Array.from({ length: 22 }, (_, i) => {
     const d = new Date(today); d.setDate(today.getDate() - 7 + i); return d;
   });
   const [activeDayIdx, setActiveDayIdx] = useState(7);
+  const [viewBarber, setViewBarber]     = useState(barber.id); // admin: id do barbeiro ou 'todos'
   const [agendamentos, setAgendamentos] = useState([]);
   const [loading, setLoading]           = useState(false);
   const [selectedAppt, setSelectedAppt] = useState(null);
 
   const activeDay = days[activeDayIdx];
   const dateStr   = activeDay.toISOString().split('T')[0];
+  const barberById = (id) => barbeiros.find(b => b.id === id);
 
   const fetchAgendamentos = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await supabase
+      let q = supabase
         .from('agendamentos')
-        .select('id, cliente_nome, cliente_fone, horario, total, status, agendamento_servicos(preco_cobrado, servicos(nome, icone))')
-        .eq('barbeiro_id', barber.id)
+        .select('id, barbeiro_id, cliente_nome, cliente_fone, horario, total, status, agendamento_servicos(preco_cobrado, servicos(nome, icone))')
         .eq('data', dateStr)
         .neq('status', 'cancelado')
         .order('horario');
+      // Admin em "Todos" vê a agenda inteira; a RLS garante que quem não é admin só recebe os próprios
+      if (!isAdmin || viewBarber !== 'todos') q = q.eq('barbeiro_id', isAdmin ? viewBarber : barber.id);
+      const { data } = await q;
       setAgendamentos(data ?? []);
     } finally { setLoading(false); }
-  }, [barber.id, dateStr]);
+  }, [barber.id, dateStr, isAdmin, viewBarber]);
 
   useEffect(() => { fetchAgendamentos(); }, [fetchAgendamentos]);
 
@@ -418,7 +447,19 @@ function AgendaTab({ barber }) {
           onClose={() => setSelectedAppt(null)}
           onStatusChange={handleStatusChange}
           onDelete={(id) => setAgendamentos(prev => prev.filter(a => a.id !== id))}
+          readOnly={selectedAppt.barbeiro_id !== barber.id}
+          barberName={selectedAppt.barbeiro_id !== barber.id ? barberById(selectedAppt.barbeiro_id)?.nome : null}
         />
+      )}
+
+      {isAdmin && barbeiros.length > 0 && (
+        <div className="barber-scroll">
+          {[{ id: 'todos', nome: 'Todos' }, ...barbeiros].map(b => (
+            <button key={b.id} className={`chip ${viewBarber===b.id?'active':''}`} onClick={() => setViewBarber(b.id)}>
+              {b.id === barber.id ? 'Minha agenda' : b.nome}
+            </button>
+          ))}
+        </div>
       )}
 
       <div className="date-scroll">
@@ -447,6 +488,11 @@ function AgendaTab({ barber }) {
             <div className="appt-total">R$ {Number(a.total).toFixed(0)}</div>
           </div>
           <div className="appt-svcs">
+            {isAdmin && viewBarber === 'todos' && (
+              <span className="appt-svc-tag" style={{color: barberById(a.barbeiro_id)?.cor ?? 'var(--gold)', fontWeight:600}}>
+                ✂️ {barberById(a.barbeiro_id)?.nome ?? '—'}
+              </span>
+            )}
             {(a.agendamento_servicos ?? []).map((as, i) => (
               <span key={i} className="appt-svc-tag">{as.servicos?.icone} {as.servicos?.nome}</span>
             ))}
@@ -785,10 +831,23 @@ function FaturamentoTab({ barber }) {
 
 
 // ─── Faturamento Tela Cheia ───────────────────────────────────────────────────
-function FaturamentoScreen({ barber, onClose }) {
-  const [period, setPeriod]   = useState('dia');
-  const [data, setData]       = useState([]);
-  const [loading, setLoading] = useState(false);
+// Barbeiro comum: vê o próprio faturamento, repasse e adiantamentos recebidos.
+// Admin (dono): vê a loja inteira, cada funcionário (faturou / repasse / adiantamentos / a pagar)
+// e lança adiantamentos. `barbeiros` só vem preenchido para o admin.
+function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
+  const isAdmin = !!barber.admin;
+  const [period, setPeriod]         = useState('dia');
+  const [viewMonth, setViewMonth]   = useState({ y: today.getFullYear(), m: today.getMonth() }); // navegação do período "Mês"
+  const [viewBarber, setViewBarber] = useState(isAdmin ? 'todos' : barber.id);
+  const [data, setData]             = useState([]);
+  const [adiant, setAdiant]         = useState([]);
+  const [loading, setLoading]       = useState(false);
+  const [advValor, setAdvValor]     = useState('');
+  const [advDesc, setAdvDesc]       = useState('');
+  const [advData, setAdvData]       = useState(toDateStr(today.getDate(), today.getMonth(), today.getFullYear()));
+  const [advSaving, setAdvSaving]   = useState(false);
+
+  const isCurrentMonth = viewMonth.y === today.getFullYear() && viewMonth.m === today.getMonth();
 
   const getRange = () => {
     const now = new Date();
@@ -801,41 +860,63 @@ function FaturamentoScreen({ barber, onClose }) {
       const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
       return { start: fmt(mon), end: fmt(sun) };
     }
-    const start = `${now.getFullYear()}-${pad(now.getMonth()+1)}-01`;
-    const end   = fmt(new Date(now.getFullYear(), now.getMonth()+1, 0));
+    const start = `${viewMonth.y}-${pad(viewMonth.m+1)}-01`;
+    const end   = fmt(new Date(viewMonth.y, viewMonth.m+1, 0));
     return { start, end };
   };
-
-  const isFuncionario = FUNCIONARIOS.includes(barber.email);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const { start, end } = getRange();
-      const { data: rows } = await supabase
+      let q = supabase
         .from('agendamentos')
-        .select('data, total, status, desconto')
-        .eq('barbeiro_id', barber.id)
+        .select('barbeiro_id, data, total, status, desconto')
         .eq('status', 'concluido')
         .gte('data', start)
         .lte('data', end)
         .order('data');
+      let qa = supabase
+        .from('adiantamentos')
+        .select('id, barbeiro_id, data, valor, descricao')
+        .gte('data', start)
+        .lte('data', end)
+        .order('data', { ascending: false });
+      if (!isAdmin) { q = q.eq('barbeiro_id', barber.id); qa = qa.eq('barbeiro_id', barber.id); }
+      const [{ data: rows }, { data: advs }] = await Promise.all([q, qa]);
       setData(rows ?? []);
+      setAdiant(advs ?? []);
     } finally { setLoading(false); }
-  }, [barber.id, period]);
+  }, [barber.id, isAdmin, period, viewMonth.y, viewMonth.m]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const totalFaturado = data.reduce((sum, r) => sum + Number(r.total), 0);
-  const totalAtend    = data.length;
-  // Repasse calculado sobre valor cheio (total + desconto)
-  const totalRepasse  = isFuncionario
-    ? data.reduce((sum, r) => sum + getRepasse(Number(r.total), r.data, barber.email), 0)
-    : 0;
-  const byDay = data.reduce((acc, r) => { acc[r.data] = (acc[r.data]||0)+Number(r.total); return acc; }, {});
+  // Números de um barbeiro no período. Repasse e adiantamentos são derivados na renderização.
+  const calc = (b) => {
+    const rows     = data.filter(r => r.barbeiro_id === b.id);
+    const faturado = rows.reduce((sum, r) => sum + Number(r.total), 0);
+    const func     = FUNCIONARIOS.includes(b.email);
+    const repasse  = func ? rows.reduce((sum, r) => sum + getRepasse(Number(r.total), r.data, b.email), 0) : 0;
+    const advs     = adiant.filter(a => a.barbeiro_id === b.id);
+    const totalAdv = advs.reduce((sum, a) => sum + Number(a.valor), 0);
+    return { rows, faturado, atend: rows.length, func, repasse, advs, totalAdv, aReceber: repasse - totalAdv };
+  };
+
+  const selBarber = viewBarber === 'todos' ? null : (barbeiros.find(b => b.id === viewBarber) ?? barber);
+  const sel       = selBarber ? calc(selBarber) : null;
+
+  // Visão geral da loja (admin, "Todos")
+  const lista       = barbeiros.map(b => ({ b, ...calc(b) }));
+  const lojaTotal   = lista.reduce((s, x) => s + x.faturado, 0);
+  const lojaAtend   = lista.reduce((s, x) => s + x.atend, 0);
+  const lojaRepasse = lista.reduce((s, x) => s + x.repasse, 0);
+  const lojaAdv     = lista.reduce((s, x) => s + x.totalAdv, 0);
+
+  const byDay = (sel?.rows ?? []).reduce((acc, r) => { acc[r.data] = (acc[r.data]||0)+Number(r.total); return acc; }, {});
   const dias  = Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b));
   const maxVal = Math.max(...dias.map(([,v]) => v), 1);
 
+  const fmtBRL = (v) => `R$ ${v.toFixed(2).replace('.', ',')}`;
   const fmtDia = (dateStr) => {
     const [y,m,d] = dateStr.split('-');
     const dt = new Date(Number(y), Number(m)-1, Number(d));
@@ -843,17 +924,49 @@ function FaturamentoScreen({ barber, onClose }) {
     if (period === 'semana') return dt.toLocaleDateString('pt-BR',{weekday:'short',day:'numeric'});
     return dt.toLocaleDateString('pt-BR',{day:'numeric',month:'short'});
   };
+  const fmtDataCurta = (dateStr) => { const [,m,d] = dateStr.split('-'); return `${d}/${m}`; };
 
-  const periodLabel = { dia:'hoje', semana:'esta semana', mes:'este mês' };
+  const periodLabel = { dia:'hoje', semana:'esta semana', mes: isCurrentMonth ? 'este mês' : `em ${MONTHS_PT[viewMonth.m].toLowerCase()}` };
+  const prevMonth = () => setViewMonth(v => v.m === 0  ? { y: v.y-1, m: 11 } : { y: v.y, m: v.m-1 });
+  const nextMonth = () => setViewMonth(v => v.m === 11 ? { y: v.y+1, m: 0 }  : { y: v.y, m: v.m+1 });
 
   // Percentual em vigor hoje, para a legenda do card de repasse
-  const pctHoje = getPctRepasse(barber.email, toDateStr(today.getDate(), today.getMonth(), today.getFullYear()));
+  const pctHoje = selBarber ? getPctRepasse(selBarber.email, toDateStr(today.getDate(), today.getMonth(), today.getFullYear())) : REPASSE_PADRAO;
+
+  const addAdiantamento = async () => {
+    const valor = Number(String(advValor).replace(',', '.'));
+    if (!selBarber || !valor || valor <= 0 || !advData) return;
+    setAdvSaving(true);
+    try {
+      const { error } = await supabase
+        .from('adiantamentos')
+        .insert({ barbeiro_id: selBarber.id, data: advData, valor, descricao: advDesc.trim() || null });
+      if (error) throw error;
+      setAdvValor(''); setAdvDesc('');
+      await fetchData();
+    } catch (err) {
+      alert('Erro ao lançar adiantamento. Tente novamente.');
+      console.error(err);
+    } finally { setAdvSaving(false); }
+  };
+
+  const delAdiantamento = async (a) => {
+    if (!confirm(`Excluir adiantamento de ${fmtBRL(Number(a.valor))}?`)) return;
+    try {
+      const { error } = await supabase.from('adiantamentos').delete().eq('id', a.id);
+      if (error) throw error;
+      setAdiant(prev => prev.filter(x => x.id !== a.id));
+    } catch (err) {
+      alert('Erro ao excluir adiantamento.');
+      console.error(err);
+    }
+  };
 
   return (
     <div className="fat-screen">
       <div className="fat-screen-header">
         <button className="fat-back-btn" onClick={onClose}>‹</button>
-        <div className="fat-screen-title">Caixa</div>
+        <div className="fat-screen-title">{isAdmin ? 'Caixa da loja' : 'Caixa'}</div>
         <div style={{flex:1}}/>
         <span style={{color:'var(--dim)',fontSize:'0.75rem'}}>
           {today.toLocaleDateString('pt-BR',{day:'numeric',month:'short'})}
@@ -867,45 +980,161 @@ function FaturamentoScreen({ barber, onClose }) {
           ))}
         </div>
 
+        {period === 'mes' && (
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+            <button className="fat-back-btn" onClick={prevMonth}>‹</button>
+            <span style={{fontWeight:600,fontSize:'0.95rem'}}>{MONTHS_PT[viewMonth.m]} {viewMonth.y}</span>
+            <button className="fat-back-btn" onClick={nextMonth} disabled={isCurrentMonth} style={{opacity:isCurrentMonth?0.3:1}}>›</button>
+          </div>
+        )}
+
+        {isAdmin && barbeiros.length > 0 && (
+          <div className="barber-scroll">
+            {[{ id: 'todos', nome: 'Loja' }, ...barbeiros].map(b => (
+              <button key={b.id} className={`chip ${viewBarber===b.id?'active':''}`} onClick={() => setViewBarber(b.id)}>
+                {b.id === 'todos' ? '🏪 Loja' : b.id === barber.id ? 'Eu' : b.nome}
+              </button>
+            ))}
+          </div>
+        )}
+
         {loading ? (
           <div style={{display:'flex',justifyContent:'center',padding:'3rem'}}><Spinner size={32}/></div>
-        ) : (
+        ) : !selBarber ? (
           <>
-            {/* Stats grandes */}
+            {/* ── Visão da loja (admin) ── */}
             <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'1.5rem',marginBottom:'1rem',textAlign:'center'}}>
               <div style={{fontSize:'0.7rem',fontWeight:600,letterSpacing:'0.12em',textTransform:'uppercase',color:'var(--dim)',marginBottom:'0.5rem'}}>
-                Total faturado {periodLabel[period]}
+                Loja faturou {periodLabel[period]}
               </div>
               <div style={{fontSize:'2.8rem',fontWeight:700,color:'var(--gold)',lineHeight:1}}>
-                R$ {totalFaturado.toFixed(0)}
+                R$ {lojaTotal.toFixed(0)}
               </div>
               <div style={{color:'var(--muted)',fontSize:'0.85rem',marginTop:'0.5rem'}}>
-                {totalAtend} atendimento{totalAtend!==1?'s':''} concluído{totalAtend!==1?'s':''}
+                {lojaAtend} atendimento{lojaAtend!==1?'s':''} concluído{lojaAtend!==1?'s':''}
+              </div>
+            </div>
+
+            <div className="fat-stat-grid" style={{marginBottom:'1rem'}}>
+              <div className="fat-stat">
+                <div className="fat-stat-label">Repasses</div>
+                <div className="fat-stat-value" style={{color:'var(--green)'}}>{fmtBRL(lojaRepasse)}</div>
+              </div>
+              <div className="fat-stat">
+                <div className="fat-stat-label">Fica pra loja</div>
+                <div className="fat-stat-value" style={{color:'var(--gold)'}}>{fmtBRL(lojaTotal - lojaRepasse)}</div>
+              </div>
+              <div className="fat-stat">
+                <div className="fat-stat-label">Adiantamentos</div>
+                <div className="fat-stat-value" style={{color:'var(--red)'}}>{fmtBRL(lojaAdv)}</div>
+              </div>
+              <div className="fat-stat">
+                <div className="fat-stat-label">A pagar</div>
+                <div className="fat-stat-value">{fmtBRL(lojaRepasse - lojaAdv)}</div>
+              </div>
+            </div>
+
+            <div className="card-block">
+              <div className="card-block-title">Por barbeiro</div>
+              {lista.length === 0 ? (
+                <div style={{textAlign:'center',padding:'1.5rem 0',color:'var(--dim)',fontSize:'0.88rem'}}>Nenhum barbeiro cadastrado</div>
+              ) : lista.map(({ b, faturado, atend, func, repasse, totalAdv, aReceber }) => (
+                <div key={b.id} className="barber-row" onClick={() => setViewBarber(b.id)}>
+                  <div className="avatar" style={{background: b.cor ?? '#f59e0b'}}>{b.avatar}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div className="barber-row-name">{b.nome}{b.id===barber.id ? ' (eu)' : ''}</div>
+                    <div className="barber-row-sub">
+                      {atend} atend. · faturou R$ {faturado.toFixed(0)}
+                      {func ? ` · repasse ${fmtBRL(repasse)}` : ' · sem repasse'}
+                      {totalAdv > 0 ? ` · adiant. ${fmtBRL(totalAdv)}` : ''}
+                    </div>
+                  </div>
+                  <div style={{textAlign:'right',flexShrink:0}}>
+                    <div style={{fontWeight:700,color: func ? 'var(--green)' : 'var(--gold)',fontSize:'0.95rem'}}>
+                      {func ? fmtBRL(aReceber) : `R$ ${faturado.toFixed(0)}`}
+                    </div>
+                    <div style={{color:'var(--dim)',fontSize:'0.68rem'}}>{func ? 'a pagar' : 'faturado'}</div>
+                  </div>
+                  <span style={{color:'var(--dim)'}}>›</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* ── Visão de um barbeiro (o próprio, ou o escolhido pelo admin) ── */}
+            <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'1.5rem',marginBottom:'1rem',textAlign:'center'}}>
+              <div style={{fontSize:'0.7rem',fontWeight:600,letterSpacing:'0.12em',textTransform:'uppercase',color:'var(--dim)',marginBottom:'0.5rem'}}>
+                {selBarber.id === barber.id ? 'Total faturado' : `${selBarber.nome} faturou`} {periodLabel[period]}
+              </div>
+              <div style={{fontSize:'2.8rem',fontWeight:700,color:'var(--gold)',lineHeight:1}}>
+                R$ {sel.faturado.toFixed(0)}
+              </div>
+              <div style={{color:'var(--muted)',fontSize:'0.85rem',marginTop:'0.5rem'}}>
+                {sel.atend} atendimento{sel.atend!==1?'s':''} concluído{sel.atend!==1?'s':''}
               </div>
             </div>
 
             <div className="fat-stat-grid" style={{marginBottom:'1rem'}}>
               <div className="fat-stat">
                 <div className="fat-stat-label">Ticket médio</div>
-                <div className="fat-stat-value">{totalAtend>0 ? `R$ ${(totalFaturado/totalAtend).toFixed(0)}` : '—'}</div>
+                <div className="fat-stat-value">{sel.atend>0 ? `R$ ${(sel.faturado/sel.atend).toFixed(0)}` : '—'}</div>
               </div>
               <div className="fat-stat">
                 <div className="fat-stat-label">Atendimentos</div>
-                <div className="fat-stat-value">{totalAtend}</div>
+                <div className="fat-stat-value">{sel.atend}</div>
               </div>
             </div>
 
-            {isFuncionario && (
+            {sel.func && (
               <div style={{background:'#0d1a0d',border:'1px solid rgba(74,222,128,0.2)',borderRadius:'var(--radius)',padding:'1.2rem',marginBottom:'1rem',textAlign:'center'}}>
                 <div style={{fontSize:'0.7rem',fontWeight:600,letterSpacing:'0.12em',textTransform:'uppercase',color:'#4ade80',marginBottom:'0.4rem',opacity:0.7}}>
-                  Seu repasse {periodLabel[period]}
+                  {selBarber.id === barber.id ? 'Seu repasse' : 'Repasse'} {periodLabel[period]}
                 </div>
                 <div style={{fontSize:'2.2rem',fontWeight:700,color:'#4ade80',lineHeight:1}}>
-                  R$ {totalRepasse.toFixed(2).replace(".", ",")}
+                  {fmtBRL(sel.repasse)}
                 </div>
                 <div style={{color:'rgba(74,222,128,0.5)',fontSize:'0.78rem',marginTop:'0.4rem'}}>
                   {Math.round(pctHoje.semana*100)}% seg–sáb · {Math.round(pctHoje.domingo*100)}% domingos
                 </div>
+                {sel.totalAdv > 0 && (
+                  <div style={{marginTop:'0.9rem',paddingTop:'0.8rem',borderTop:'1px solid rgba(74,222,128,0.15)'}}>
+                    <div className="sum-row"><span className="sum-key">Adiantamentos</span><span className="sum-val" style={{color:'var(--red)'}}>− {fmtBRL(sel.totalAdv)}</span></div>
+                    <div className="sum-row"><span className="sum-key" style={{fontWeight:600,color:'var(--text)'}}>{selBarber.id === barber.id ? 'Você recebe' : 'A pagar'}</span><span className="sum-val" style={{fontWeight:700,fontSize:'1rem'}}>{fmtBRL(sel.aReceber)}</span></div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {(sel.func || sel.advs.length > 0) && (
+              <div className="card-block">
+                <div className="card-block-title">Adiantamentos {periodLabel[period]}</div>
+                {sel.advs.length === 0 ? (
+                  <div style={{textAlign:'center',padding:'0.8rem 0',color:'var(--dim)',fontSize:'0.85rem'}}>Nenhum adiantamento</div>
+                ) : sel.advs.map(a => (
+                  <div key={a.id} className="adv-row">
+                    <span style={{color:'var(--muted)',minWidth:40}}>{fmtDataCurta(a.data)}</span>
+                    <span style={{flex:1,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.descricao || 'Adiantamento'}</span>
+                    <span style={{fontWeight:600,color:'var(--red)'}}>− {fmtBRL(Number(a.valor))}</span>
+                    {isAdmin && <button className="adv-del" onClick={() => delAdiantamento(a)} title="Excluir">🗑</button>}
+                  </div>
+                ))}
+
+                {isAdmin && (
+                  <div style={{marginTop:'1rem',paddingTop:'1rem',borderTop:'1px solid var(--border)'}}>
+                    <div className="field-label">Lançar adiantamento para {selBarber.nome}</div>
+                    <div style={{display:'flex',gap:'0.5rem',marginBottom:'0.6rem'}}>
+                      <input className="field-input" type="number" inputMode="decimal" min="0" step="0.01" placeholder="Valor (R$)"
+                        value={advValor} onChange={e => setAdvValor(e.target.value)} style={{flex:1}} />
+                      <input className="field-input" type="date" value={advData} onChange={e => setAdvData(e.target.value)} style={{flex:1}} />
+                    </div>
+                    <input className="field-input" type="text" placeholder="Descrição (opcional)" value={advDesc}
+                      onChange={e => setAdvDesc(e.target.value)} onKeyDown={e => e.key==='Enter' && addAdiantamento()} style={{marginBottom:'0.6rem'}} />
+                    <button className="btn-gold" onClick={addAdiantamento} disabled={advSaving || !advValor || !advData}>
+                      {advSaving ? <><Spinner size={18} dark/> Salvando...</> : '💸 Lançar adiantamento'}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1113,12 +1342,19 @@ function AvulsoTab({ barber }) {
 function Dashboard({ barber, onLogout }) {
   const [tab, setTab]       = useState('agenda');
   const [showFat, setShowFat] = useState(false);
+  const [barbeiros, setBarbeiros] = useState([]); // só o admin carrega (RLS libera a leitura de todos)
+
+  useEffect(() => {
+    if (!barber.admin) return;
+    supabase.from('barbeiros').select('id, nome, email, avatar, cor').order('nome')
+      .then(({ data }) => setBarbeiros(data ?? []));
+  }, [barber.admin]);
 
   const handleLogout = async () => { await supabase.auth.signOut(); onLogout(); };
 
   return (
     <div className="dash-wrap">
-      {showFat && <FaturamentoScreen barber={barber} onClose={() => setShowFat(false)} />}
+      {showFat && <FaturamentoScreen barber={barber} barbeiros={barbeiros} onClose={() => setShowFat(false)} />}
       <div className="topbar">
         <div className="topbar-logo">NC BARBER</div>
         <div className="topbar-right">
@@ -1128,7 +1364,7 @@ function Dashboard({ barber, onLogout }) {
         </div>
       </div>
       <div className="greeting">
-        <div className="greeting-name">Olá, {barber.nome} ✂️</div>
+        <div className="greeting-name">Olá, {barber.nome} {barber.admin ? '👑' : '✂️'}</div>
         <div className="greeting-sub">{today.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})}</div>
       </div>
       <div className="tabs">
@@ -1137,7 +1373,7 @@ function Dashboard({ barber, onLogout }) {
         <button className={`tab-btn ${tab==='avulso'?'active':''}`}  onClick={()=>setTab('avulso')}>⚡ Atend.</button>
       </div>
       <div className="tab-content">
-        {tab==='agenda' ? <AgendaTab barber={barber}/>
+        {tab==='agenda' ? <AgendaTab barber={barber} barbeiros={barbeiros}/>
           : tab==='novo' ? <NovoAgendamentoTab barber={barber}/>
           : <AvulsoTab barber={barber}/>}
       </div>
