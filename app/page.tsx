@@ -425,10 +425,11 @@ function AgendaTab({ barber, barbeiros = [] }) {
         .order('horario');
       // Admin em "Todos" vê a agenda inteira; a RLS garante que quem não é admin só recebe os próprios
       if (!isAdmin || viewBarber !== 'todos') q = q.eq('barbeiro_id', isAdmin ? viewBarber : barber.id);
+      else q = q.in('barbeiro_id', barbeiros.map(b => b.id)); // só quem está na lista (some com gerentes/conta de teste)
       const { data } = await q;
       setAgendamentos(data ?? []);
     } finally { setLoading(false); }
-  }, [barber.id, dateStr, isAdmin, viewBarber]);
+  }, [barber.id, dateStr, isAdmin, viewBarber, barbeiros]);
 
   useEffect(() => { fetchAgendamentos(); }, [fetchAgendamentos]);
 
@@ -973,15 +974,21 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
   // Percentual em vigor hoje, para a legenda do card de repasse
   const pctHoje = selBarber ? getPctRepasse(selBarber.email, hojeStr) : REPASSE_PADRAO;
   const barberNome = (id) => barbeiros.find(b => b.id === id)?.nome ?? '—';
+  // No próprio Caixa quem corta cabelo pede (pendente); o gerente lança direto para os outros.
+  // A conta de teste do Kaio é gerente e barbeiro ao mesmo tempo: no próprio Caixa ela pede, e aprova na Loja.
+  const pedindo  = !!selBarber && selBarber.id === barber.id && !barber.admin;
+  const lancando = gerente && !pedindo;
+  // Pedidos de quem está fora da lista (conta de teste) não aparecem para os outros.
+  const pendVis  = isAdmin ? pendentes.filter(a => barbeiros.some(b => b.id === a.barbeiro_id)) : pendentes;
 
   // Gerente lança já aprovado; barbeiro só cria pedido pendente (a RLS também exige isso).
   const addAdiantamento = async () => {
     const valor = Number(String(advValor).replace(',', '.'));
-    if (!selBarber || !valor || valor <= 0 || (gerente && !advData)) return;
-    if (!gerente && !advDesc.trim()) { alert('Diga o motivo do adiantamento.'); return; }
+    if (!selBarber || !valor || valor <= 0 || (lancando && !advData)) return;
+    if (!lancando && !advDesc.trim()) { alert('Diga o motivo do adiantamento.'); return; }
     setAdvSaving(true);
     try {
-      const row = gerente
+      const row = lancando
         ? { barbeiro_id: selBarber.id, data: advData, valor, descricao: advDesc.trim() || null, status: 'aprovado', decidido_por: barber.id, decidido_em: new Date().toISOString() }
         : { barbeiro_id: barber.id, data: hojeStr, valor, descricao: advDesc.trim(), status: 'pendente' };
       const { error } = await supabase.from('adiantamentos').insert(row);
@@ -989,7 +996,7 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
       setAdvValor(''); setAdvDesc('');
       await fetchData();
     } catch (err) {
-      alert(gerente ? 'Erro ao lançar adiantamento. Tente novamente.' : 'Erro ao enviar o pedido. Tente novamente.');
+      alert(lancando ? 'Erro ao lançar adiantamento. Tente novamente.' : 'Erro ao enviar o pedido. Tente novamente.');
       console.error(err);
     } finally { setAdvSaving(false); }
   };
@@ -1042,7 +1049,7 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
       <div className="fat-screen-header">
         <button className="fat-back-btn" onClick={onClose}>‹</button>
         <div className="fat-screen-title">{isAdmin ? 'Caixa da loja' : 'Caixa'}</div>
-        {gerente && pendentes.length > 0 && <span className="status-badge status-cancelado" style={{marginLeft:'0.6rem'}}>{pendentes.length} pedido{pendentes.length!==1?'s':''}</span>}
+        {gerente && pendVis.length > 0 && <span className="status-badge status-cancelado" style={{marginLeft:'0.6rem'}}>{pendVis.length} pedido{pendVis.length!==1?'s':''}</span>}
         <div style={{flex:1}}/>
         <span style={{color:'var(--dim)',fontSize:'0.75rem'}}>
           {today.toLocaleDateString('pt-BR',{day:'numeric',month:'short'})}
@@ -1079,10 +1086,10 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
         ) : !selBarber ? (
           <>
             {/* ── Pedidos de adiantamento aguardando (gerente decide, dono só vê) ── */}
-            {pendentes.length > 0 && (
+            {pendVis.length > 0 && (
               <div className="card-block" style={{borderColor:'rgba(245,158,11,0.4)'}}>
                 <div className="card-block-title">Pedidos de adiantamento</div>
-                {pendentes.map(a => (
+                {pendVis.map(a => (
                   <div key={a.id} className="adv-row" style={{flexWrap:'wrap'}}>
                     <span style={{color:'var(--muted)',minWidth:40}}>{fmtDataCurta(a.data)}</span>
                     <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
@@ -1218,31 +1225,31 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
                     <span style={{fontWeight:600,color: a.status === 'aprovado' ? 'var(--red)' : 'var(--dim)',textDecoration: a.status === 'recusado' ? 'line-through' : 'none'}}>
                       {a.status === 'aprovado' ? '− ' : ''}{fmtBRL(Number(a.valor))}
                     </span>
-                    {gerente && a.status === 'pendente' && (
+                    {lancando && a.status === 'pendente' && (
                       <>
                         <button className="adv-del" style={{color:'var(--green)'}} onClick={() => decidir(a, 'aprovado')} title="Aprovar">✓</button>
                         <button className="adv-del" onClick={() => decidir(a, 'recusado')} title="Recusar">✕</button>
                       </>
                     )}
                     {gerente && a.status !== 'pendente' && <button className="adv-del" onClick={() => delAdiantamento(a)} title="Excluir">🗑</button>}
-                    {!isAdmin && a.status === 'pendente' && <button className="adv-del" onClick={() => cancelarPedido(a)} title="Cancelar pedido">✕</button>}
+                    {pedindo && a.status === 'pendente' && <button className="adv-del" onClick={() => cancelarPedido(a)} title="Cancelar pedido">✕</button>}
                   </div>
                 ))}
 
-                {(gerente || (!isAdmin && selBarber.id === barber.id && sel.func)) && (
+                {(lancando || (pedindo && sel.func)) && (
                   <div style={{marginTop:'1rem',paddingTop:'1rem',borderTop:'1px solid var(--border)'}}>
-                    <div className="field-label">{gerente ? `Lançar adiantamento para ${selBarber.nome}` : 'Pedir adiantamento ao gerente'}</div>
+                    <div className="field-label">{lancando ? `Lançar adiantamento para ${selBarber.nome}` : 'Pedir adiantamento ao gerente'}</div>
                     <div style={{display:'flex',gap:'0.5rem',marginBottom:'0.6rem'}}>
                       <input className="field-input" type="number" inputMode="decimal" min="0" step="0.01" placeholder="Valor (R$)"
                         value={advValor} onChange={e => setAdvValor(e.target.value)} style={{flex:1}} />
-                      {gerente && <input className="field-input" type="date" value={advData} onChange={e => setAdvData(e.target.value)} style={{flex:1}} />}
+                      {lancando && <input className="field-input" type="date" value={advData} onChange={e => setAdvData(e.target.value)} style={{flex:1}} />}
                     </div>
-                    <input className="field-input" type="text" placeholder={gerente ? 'Descrição (opcional)' : 'Motivo'} value={advDesc}
+                    <input className="field-input" type="text" placeholder={lancando ? 'Descrição (opcional)' : 'Motivo'} value={advDesc}
                       onChange={e => setAdvDesc(e.target.value)} onKeyDown={e => e.key==='Enter' && addAdiantamento()} style={{marginBottom:'0.6rem'}} />
-                    <button className="btn-gold" onClick={addAdiantamento} disabled={advSaving || !advValor || (gerente && !advData)}>
-                      {advSaving ? <><Spinner size={18} dark/> Salvando...</> : gerente ? '💸 Lançar adiantamento' : '📨 Enviar pedido'}
+                    <button className="btn-gold" onClick={addAdiantamento} disabled={advSaving || !advValor || (lancando && !advData)}>
+                      {advSaving ? <><Spinner size={18} dark/> Salvando...</> : lancando ? '💸 Lançar adiantamento' : '📨 Enviar pedido'}
                     </button>
-                    {!gerente && <div style={{color:'var(--dim)',fontSize:'0.75rem',marginTop:'0.5rem',textAlign:'center'}}>Só é descontado depois que o gerente aprovar.</div>}
+                    {!lancando && <div style={{color:'var(--dim)',fontSize:'0.75rem',marginTop:'0.5rem',textAlign:'center'}}>Só é descontado depois que o gerente aprovar.</div>}
                   </div>
                 )}
               </div>
@@ -1473,8 +1480,8 @@ function Dashboard({ barber, onLogout }) {
     if (!todos) return;
     // O gerente não corta cabelo: fica fora das listas de barbeiros.
     supabase.from('barbeiros').select('id, nome, email, avatar, cor, gerente').order('nome')
-      .then(({ data }) => setBarbeiros((data ?? []).filter(b => !b.gerente)));
-  }, [todos]);
+      .then(({ data }) => setBarbeiros((data ?? []).filter(b => !b.gerente || (b.id === barber.id && FUNCIONARIOS.includes(b.email)))));
+  }, [todos, barber.id]);
 
   const handleLogout = async () => { await supabase.auth.signOut(); onLogout(); };
 
