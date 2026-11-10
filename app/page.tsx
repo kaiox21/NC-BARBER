@@ -1478,10 +1478,12 @@ function Dashboard({ barber, onLogout }) {
 
   useEffect(() => {
     if (!todos) return;
-    // O gerente não corta cabelo: fica fora das listas de barbeiros.
-    supabase.from('barbeiros').select('id, nome, email, avatar, cor, gerente').order('nome')
-      .then(({ data }) => setBarbeiros((data ?? []).filter(b => !b.gerente || (b.id === barber.id && FUNCIONARIOS.includes(b.email)))));
-  }, [todos, barber.id]);
+    // Gerentes não cortam cabelo: ficam fora das listas (exceto a própria conta híbrida de teste).
+    // Para o gerente, o dono (admin) também some — ele não lança nem acompanha os números do Netto.
+    supabase.from('barbeiros').select('id, nome, email, avatar, cor, gerente, admin').order('nome')
+      .then(({ data }) => setBarbeiros((data ?? []).filter(b =>
+        (!b.gerente || (b.id === barber.id && FUNCIONARIOS.includes(b.email))) && !(gerente && b.admin))));
+  }, [todos, barber.id, gerente]);
 
   const handleLogout = async () => { await supabase.auth.signOut(); onLogout(); };
 
