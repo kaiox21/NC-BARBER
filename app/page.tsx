@@ -985,12 +985,11 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
   const addAdiantamento = async () => {
     const valor = Number(String(advValor).replace(',', '.'));
     if (!selBarber || !valor || valor <= 0 || (lancando && !advData)) return;
-    if (!lancando && !advDesc.trim()) { alert('Diga o motivo do adiantamento.'); return; }
     setAdvSaving(true);
     try {
       const row = lancando
         ? { barbeiro_id: selBarber.id, data: advData, valor, descricao: advDesc.trim() || null, status: 'aprovado', decidido_por: barber.id, decidido_em: new Date().toISOString() }
-        : { barbeiro_id: barber.id, data: hojeStr, valor, descricao: advDesc.trim(), status: 'pendente' };
+        : { barbeiro_id: barber.id, data: hojeStr, valor, status: 'pendente' }; // barbeiro não precisa justificar
       const { error } = await supabase.from('adiantamentos').insert(row);
       if (error) throw error;
       setAdvValor(''); setAdvDesc('');
@@ -1244,8 +1243,8 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
                         value={advValor} onChange={e => setAdvValor(e.target.value)} style={{flex:1}} />
                       {lancando && <input className="field-input" type="date" value={advData} onChange={e => setAdvData(e.target.value)} style={{flex:1}} />}
                     </div>
-                    <input className="field-input" type="text" placeholder={lancando ? 'Descrição (opcional)' : 'Motivo'} value={advDesc}
-                      onChange={e => setAdvDesc(e.target.value)} onKeyDown={e => e.key==='Enter' && addAdiantamento()} style={{marginBottom:'0.6rem'}} />
+                    {lancando && <input className="field-input" type="text" placeholder="Descrição (opcional)" value={advDesc}
+                      onChange={e => setAdvDesc(e.target.value)} onKeyDown={e => e.key==='Enter' && addAdiantamento()} style={{marginBottom:'0.6rem'}} />}
                     <button className="btn-gold" onClick={addAdiantamento} disabled={advSaving || !advValor || (lancando && !advData)}>
                       {advSaving ? <><Spinner size={18} dark/> Salvando...</> : lancando ? '💸 Lançar adiantamento' : '📨 Enviar pedido'}
                     </button>
