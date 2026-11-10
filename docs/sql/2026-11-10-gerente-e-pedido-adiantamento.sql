@@ -45,7 +45,8 @@ create policy "gerente le todos os barbeiros"
 
 -- 2. Agendamentos: só o gerente escreve ───────────────────────────────────────
 -- Remove toda política de escrita (insert/update/delete/all) que exista hoje nas duas tabelas,
--- inclusive a "agendamentos_delete" de 27/08, e recria a leitura de forma explícita.
+-- Em 10/11 eram: agendamentos_insert/update/delete e ag_servicos_insert (todas "o próprio barbeiro").
+-- A leitura própria (agendamentos_select, ag_servicos_select) é de SELECT e fica intocada.
 do $$
 declare p record;
 begin
@@ -58,16 +59,6 @@ begin
     execute format('drop policy %I on public.%I', p.policyname, p.tablename);
   end loop;
 end $$;
-
-drop policy if exists "barbeiro le os proprios agendamentos" on public.agendamentos;
-create policy "barbeiro le os proprios agendamentos"
-  on public.agendamentos for select to authenticated
-  using (barbeiro_id = auth.uid());
-
-drop policy if exists "barbeiro le os proprios agendamento_servicos" on public.agendamento_servicos;
-create policy "barbeiro le os proprios agendamento_servicos"
-  on public.agendamento_servicos for select to authenticated
-  using (exists (select 1 from public.agendamentos a where a.id = agendamento_id and a.barbeiro_id = auth.uid()));
 
 drop policy if exists "gerente gerencia agendamentos" on public.agendamentos;
 create policy "gerente gerencia agendamentos"
