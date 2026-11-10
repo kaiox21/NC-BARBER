@@ -62,7 +62,9 @@ adiantamentos         id, barbeiro_id, data, valor, descricao, criado_por
 
 **Admin (dono).** `barbeiros.admin = true` (hoje só o Netto). O objeto `barber` já chega com a flag no login, e o app usa `barber.admin` para: carregar a lista de barbeiros no `Dashboard`, mostrar o seletor de barbeiro na `AgendaTab` (atendimento de outro abre o `ApptModal` em `readOnly`) e abrir o Caixa na visão da loja em `FaturamentoScreen`. No banco, a função `is_admin()` alimenta políticas de **select** em `barbeiros`, `agendamentos` e `agendamento_servicos` (admin lê tudo, mas não edita o que é dos outros) e um trigger impede qualquer um de ligar o próprio `admin` pela API. SQL em [`docs/sql/2026-08-27-admin-e-adiantamentos.sql`](docs/sql/2026-08-27-admin-e-adiantamentos.sql).
 
-**Adiantamentos.** Só o admin insere/exclui; cada barbeiro lê os seus. O Caixa soma os adiantamentos do período e mostra `repasse − adiantamentos` como "a pagar" / "você recebe". Assim como o repasse, nada é gravado em `agendamentos` — é tudo derivado na tela.
+**Gerente (desde 10/11/2026).** `barbeiros.gerente = true`. Não é barbeiro (fica fora das listas). É o **único** que escreve em `agendamentos`/`agendamento_servicos` — as abas "+ Novo" e "⚡ Atend." só aparecem para ele e têm seletor de barbeiro — e o único que lança, exclui, aprova ou recusa adiantamentos. Desde então o admin (dono) **só lê**, e o barbeiro comum só vê a própria agenda (somente leitura) e o próprio Caixa. Função `is_gerente()`. SQL em [`docs/sql/2026-11-10-gerente-e-pedido-adiantamento.sql`](docs/sql/2026-11-10-gerente-e-pedido-adiantamento.sql).
+
+**Adiantamentos.** `status` ∈ `pendente` | `aprovado` | `recusado`. O barbeiro cria pedido (`pendente`, a RLS exige) e pode cancelar enquanto pendente; o gerente aprova (a `data` passa a ser a da aprovação) ou recusa, ou lança direto já `aprovado`. **Só `aprovado` desconta**: o Caixa mostra `repasse − aprovados` como "a pagar" / "você recebe". Pendentes são buscados sem filtro de período. Assim como o repasse, nada é gravado em `agendamentos` — é tudo derivado na tela.
 
 `status` ∈ `confirmado` | `concluido` | `cancelado`. Agendamentos nascem `confirmado`; atendimentos avulsos nascem `concluido` (`app/page.tsx:957`).
 
@@ -73,7 +75,7 @@ Só entra no faturamento o que está `concluido`. A agenda mostra tudo que **nã
 Barbeiros funcionários recebem uma porcentagem; o resto fica com o dono.
 
 - Quem é funcionário: array `FUNCIONARIOS` de emails em `app/page.tsx:22`.
-- Quanto: `getRepasse` (`app/page.tsx:23`) — **50%**, ou **60% aos domingos**, sobre `total`.
+- Quanto: `getRepasse` — **50%**, ou **60% aos domingos**, sobre `total`. Exceções com data de vigência em `REPASSE_REGRAS` (Junin: 55/65% de 24/08, **100%** desde 10/11/2026).
 - O dia da semana vem da coluna `data` do atendimento, não da data de fechamento. Isso é intencional.
 
 **O repasse não é armazenado.** Não há coluna de repasse nem flag de funcionário em `agendamentos`. Tudo é derivado na renderização (`app/page.tsx:787` e `app/page.tsx:810`). Consequência prática: mudar `FUNCIONARIOS` ou `getRepasse` reescreve retroativamente o valor exibido de todo o histórico. Nunca sugira "migrar registros antigos" — não há nada para migrar.

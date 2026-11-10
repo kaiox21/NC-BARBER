@@ -30,8 +30,15 @@ const REPASSE_PADRAO = { semana: 0.5, domingo: 0.6 };
 const REPASSE_REGRAS: Record<string, { desde: string; semana: number; domingo: number }[]> = {
   'juninduamassa7@gmail.com': [
     { desde: '2026-08-24', semana: 0.55, domingo: 0.65 },
+    { desde: '2026-11-10', semana: 1,    domingo: 1    }, // passa a ficar com 100% do que faz
   ],
 };
+
+// Papéis. Gerente: lança atendimentos de todos e decide adiantamentos (não é barbeiro, fica fora das listas).
+// Admin (dono): só visualiza tudo. Barbeiro comum: vê a própria agenda/caixa e pede adiantamento.
+// A RLS no banco aplica as mesmas regras — esconder botões aqui é só conveniência.
+const isGerente = (b) => !!b?.gerente;
+const veTodos   = (b) => !!b?.admin || !!b?.gerente;
 
 // Regra vigente = a de maior `desde` que já começou na data do atendimento.
 const getPctRepasse = (email: string, dateStr: string) => {
@@ -125,6 +132,7 @@ const CSS = `
   .status-badge { font-size:0.65rem; font-weight:600; padding:0.15rem 0.5rem; border-radius:999px; text-transform:uppercase; letter-spacing:0.05em; }
   .status-confirmado { background:rgba(74,222,128,0.12); color:var(--green); }
   .status-cancelado  { background:rgba(248,113,113,0.12); color:var(--red); }
+  .status-pendente   { background:rgba(245,158,11,0.12); color:var(--gold); }
   .status-concluido  { background:rgba(161,161,170,0.12); color:var(--muted); }
   .empty-state { text-align:center; padding:3rem 1rem; color:var(--dim); font-size:0.9rem; }
   .empty-icon  { font-size:2.5rem; margin-bottom:0.7rem; }
@@ -296,7 +304,7 @@ function LoginScreen({ onLogin }) {
 }
 
 // ─── Modal de Agendamento ────────────────────────────────────────────────────
-// `readOnly`: admin vendo atendimento de outro barbeiro — só visualiza, não altera.
+// `readOnly`: quem não é gerente — só visualiza, não altera.
 function ApptModal({ appt, onClose, onStatusChange, onDelete, readOnly = false, barberName = null }) {
   const [loading, setLoading] = useState(false);
 
@@ -389,20 +397,21 @@ function ApptModal({ appt, onClose, onStatusChange, onDelete, readOnly = false, 
 }
 
 // ─── Agenda ──────────────────────────────────────────────────────────────────
-// `barbeiros`: lista completa, só vem preenchida para o admin (Dashboard).
+// `barbeiros`: lista completa, só vem preenchida para admin/gerente (Dashboard).
 function AgendaTab({ barber, barbeiros = [] }) {
-  const isAdmin = !!barber.admin;
+  const isAdmin  = veTodos(barber);
+  const podeEdit = isGerente(barber);
   const days = Array.from({ length: 22 }, (_, i) => {
     const d = new Date(today); d.setDate(today.getDate() - 7 + i); return d;
   });
   const [activeDayIdx, setActiveDayIdx] = useState(7);
-  const [viewBarber, setViewBarber]     = useState(barber.id); // admin: id do barbeiro ou 'todos'
+  const [viewBarber, setViewBarber]     = useState(podeEdit ? 'todos' : barber.id); // admin/gerente: id do barbeiro ou 'todos'
   const [agendamentos, setAgendamentos] = useState([]);
   const [loading, setLoading]           = useState(false);
   const [selectedAppt, setSelectedAppt] = useState(null);
 
   const activeDay = days[activeDayIdx];
-  const dateStr   = activeDay.toISOString().split('T')[0];
+  const dateStr   = toDateStr(activeDay.getDate(), activeDay.getMonth(), activeDay.getFullYear());
   const barberById = (id) => barbeiros.find(b => b.id === id);
 
   const fetchAgendamentos = useCallback(async () => {
@@ -447,7 +456,7 @@ function AgendaTab({ barber, barbeiros = [] }) {
           onClose={() => setSelectedAppt(null)}
           onStatusChange={handleStatusChange}
           onDelete={(id) => setAgendamentos(prev => prev.filter(a => a.id !== id))}
-          readOnly={selectedAppt.barbeiro_id !== barber.id}
+          readOnly={!podeEdit}
           barberName={selectedAppt.barbeiro_id !== barber.id ? barberById(selectedAppt.barbeiro_id)?.nome : null}
         />
       )}
@@ -471,7 +480,7 @@ function AgendaTab({ barber, barbeiros = [] }) {
         ))}
       </div>
       <div className="sec-header">
-        <span className="sec-title">{activeDayIdx===0 ? 'Hoje' : fmtDate(activeDay.getDate(), activeDay.getMonth())}</span>
+        <span className="sec-title">{activeDayIdx===7 ? 'Hoje' : fmtDate(activeDay.getDate(), activeDay.getMonth())}</span>
         {!loading && <span style={{color:'var(--muted)',fontSize:'0.8rem'}}>{visibleAppts.length} agendamento{visibleAppts.length!==1?'s':''}</span>}
       </div>
       {loading ? (
@@ -507,8 +516,24 @@ function AgendaTab({ barber, barbeiros = [] }) {
   );
 }
 
+// ─── Escolha do barbeiro (gerente lança para qualquer um) ─────────────────────
+function BarberPicker({ barbeiros, value, onChange }) {
+  return (
+    <div className="card-block">
+      <div className="card-block-title">Barbeiro</div>
+      <div className="chip-wrap">
+        {barbeiros.map(b => (
+          <button key={b.id} className={`chip ${value===b.id?'active':''}`} onClick={() => onChange(b.id)}>✂️ {b.nome}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Novo Agendamento ─────────────────────────────────────────────────────────
-function NovoAgendamentoTab({ barber }) {
+function NovoAgendamentoTab({ barbeiros = [] }) {
+  const [barberId, setBarberId]       = useState(null);
+  const barber = barbeiros.find(b => b.id === barberId);
   const [viewYear, setViewYear]       = useState(today.getFullYear());
   const [viewMonth, setViewMonth]     = useState(today.getMonth());
   const [selDay, setSelDay]           = useState(null);
@@ -542,7 +567,7 @@ function NovoAgendamentoTab({ barber }) {
   const descontoVal   = Math.min(Number(desconto) || 0, subtotal);
   const totalPrice    = subtotal - descontoVal;
   const totalDuration = selServices.reduce((sum,s)=>sum+s.duracao,0);
-  const canConfirm    = selDay && selTime && selServices.length>0 && clientName;
+  const canConfirm    = barber && selDay && selTime && selServices.length>0 && clientName;
 
   const handleConfirm = async () => {
     if (!canConfirm || saving) return;
@@ -570,7 +595,7 @@ function NovoAgendamentoTab({ barber }) {
   };
 
   const handleNew = () => {
-    setSelDay(null); setSelTime(null); setSelServices([]);
+    setBarberId(null); setSelDay(null); setSelTime(null); setSelServices([]);
     setClientName(''); setClientPhone(''); setDesconto(''); setDone(false); setSavedAppt(null);
   };
 
@@ -604,6 +629,8 @@ function NovoAgendamentoTab({ barber }) {
 
   return (
     <div>
+      <BarberPicker barbeiros={barbeiros} value={barberId} onChange={setBarberId} />
+
       {/* Calendário */}
       <div className="card-block">
         <div className="card-block-title">Data</div>
@@ -696,6 +723,7 @@ function NovoAgendamentoTab({ barber }) {
               <span className="sum-val">R$ {Number(s.preco).toFixed(0)}</span>
             </div>
           ))}
+          <div className="sum-row"><span className="sum-key">Barbeiro</span><span className="sum-val">{barber?.nome ?? '—'}</span></div>
           <div className="sum-row"><span className="sum-key">Data</span><span className="sum-val">{selDay?fmtDate(selDay,viewMonth):'—'}</span></div>
           <div className="sum-row"><span className="sum-key">Horário</span><span className="sum-val">{selTime??'—'}</span></div>
           <div className="sum-row"><span className="sum-key">Duração</span><span className="sum-val">{totalDuration} min</span></div>
@@ -831,20 +859,24 @@ function FaturamentoTab({ barber }) {
 
 
 // ─── Faturamento Tela Cheia ───────────────────────────────────────────────────
-// Barbeiro comum: vê o próprio faturamento, repasse e adiantamentos recebidos.
-// Admin (dono): vê a loja inteira, cada funcionário (faturou / repasse / adiantamentos / a pagar)
-// e lança adiantamentos. `barbeiros` só vem preenchido para o admin.
+// Barbeiro comum: vê o próprio faturamento, repasse, adiantamentos e pede adiantamento.
+// Admin (dono): vê a loja inteira e cada funcionário (faturou / repasse / adiantamentos / a pagar), só leitura.
+// Gerente: vê o mesmo que o admin, lança adiantamentos e aprova/recusa os pedidos.
+// Só adiantamento `aprovado` desconta do repasse. `barbeiros` só vem preenchido para admin/gerente.
 function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
-  const isAdmin = !!barber.admin;
+  const isAdmin   = veTodos(barber);
+  const gerente   = isGerente(barber);
+  const hojeStr   = toDateStr(today.getDate(), today.getMonth(), today.getFullYear());
   const [period, setPeriod]         = useState('dia');
   const [viewMonth, setViewMonth]   = useState({ y: today.getFullYear(), m: today.getMonth() }); // navegação do período "Mês"
   const [viewBarber, setViewBarber] = useState(isAdmin ? 'todos' : barber.id);
   const [data, setData]             = useState([]);
   const [adiant, setAdiant]         = useState([]);
+  const [pendentes, setPendentes]   = useState([]); // pedidos aguardando o gerente, de qualquer data
   const [loading, setLoading]       = useState(false);
   const [advValor, setAdvValor]     = useState('');
   const [advDesc, setAdvDesc]       = useState('');
-  const [advData, setAdvData]       = useState(toDateStr(today.getDate(), today.getMonth(), today.getFullYear()));
+  const [advData, setAdvData]       = useState(hojeStr);
   const [advSaving, setAdvSaving]   = useState(false);
 
   const isCurrentMonth = viewMonth.y === today.getFullYear() && viewMonth.m === today.getMonth();
@@ -878,14 +910,21 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
         .order('data');
       let qa = supabase
         .from('adiantamentos')
-        .select('id, barbeiro_id, data, valor, descricao')
+        .select('id, barbeiro_id, data, valor, descricao, status')
+        .neq('status', 'pendente')
         .gte('data', start)
         .lte('data', end)
         .order('data', { ascending: false });
-      if (!isAdmin) { q = q.eq('barbeiro_id', barber.id); qa = qa.eq('barbeiro_id', barber.id); }
-      const [{ data: rows }, { data: advs }] = await Promise.all([q, qa]);
+      let qp = supabase
+        .from('adiantamentos')
+        .select('id, barbeiro_id, data, valor, descricao, status')
+        .eq('status', 'pendente')
+        .order('data');
+      if (!isAdmin) { q = q.eq('barbeiro_id', barber.id); qa = qa.eq('barbeiro_id', barber.id); qp = qp.eq('barbeiro_id', barber.id); }
+      const [{ data: rows }, { data: advs }, { data: pend }] = await Promise.all([q, qa, qp]);
       setData(rows ?? []);
       setAdiant(advs ?? []);
+      setPendentes(pend ?? []);
     } finally { setLoading(false); }
   }, [barber.id, isAdmin, period, viewMonth.y, viewMonth.m]);
 
@@ -897,9 +936,10 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
     const faturado = rows.reduce((sum, r) => sum + Number(r.total), 0);
     const func     = FUNCIONARIOS.includes(b.email);
     const repasse  = func ? rows.reduce((sum, r) => sum + getRepasse(Number(r.total), r.data, b.email), 0) : 0;
-    const advs     = adiant.filter(a => a.barbeiro_id === b.id);
-    const totalAdv = advs.reduce((sum, a) => sum + Number(a.valor), 0);
-    return { rows, faturado, atend: rows.length, func, repasse, advs, totalAdv, aReceber: repasse - totalAdv };
+    const advs     = adiant.filter(a => a.barbeiro_id === b.id); // aprovados e recusados do período
+    const totalAdv = advs.filter(a => a.status === 'aprovado').reduce((sum, a) => sum + Number(a.valor), 0);
+    const pend     = pendentes.filter(a => a.barbeiro_id === b.id);
+    return { rows, faturado, atend: rows.length, func, repasse, advs, pend, totalAdv, aReceber: repasse - totalAdv };
   };
 
   const selBarber = viewBarber === 'todos' ? null : (barbeiros.find(b => b.id === viewBarber) ?? barber);
@@ -931,23 +971,58 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
   const nextMonth = () => setViewMonth(v => v.m === 11 ? { y: v.y+1, m: 0 }  : { y: v.y, m: v.m+1 });
 
   // Percentual em vigor hoje, para a legenda do card de repasse
-  const pctHoje = selBarber ? getPctRepasse(selBarber.email, toDateStr(today.getDate(), today.getMonth(), today.getFullYear())) : REPASSE_PADRAO;
+  const pctHoje = selBarber ? getPctRepasse(selBarber.email, hojeStr) : REPASSE_PADRAO;
+  const barberNome = (id) => barbeiros.find(b => b.id === id)?.nome ?? '—';
 
+  // Gerente lança já aprovado; barbeiro só cria pedido pendente (a RLS também exige isso).
   const addAdiantamento = async () => {
     const valor = Number(String(advValor).replace(',', '.'));
-    if (!selBarber || !valor || valor <= 0 || !advData) return;
+    if (!selBarber || !valor || valor <= 0 || (gerente && !advData)) return;
+    if (!gerente && !advDesc.trim()) { alert('Diga o motivo do adiantamento.'); return; }
     setAdvSaving(true);
     try {
-      const { error } = await supabase
-        .from('adiantamentos')
-        .insert({ barbeiro_id: selBarber.id, data: advData, valor, descricao: advDesc.trim() || null });
+      const row = gerente
+        ? { barbeiro_id: selBarber.id, data: advData, valor, descricao: advDesc.trim() || null, status: 'aprovado', decidido_por: barber.id, decidido_em: new Date().toISOString() }
+        : { barbeiro_id: barber.id, data: hojeStr, valor, descricao: advDesc.trim(), status: 'pendente' };
+      const { error } = await supabase.from('adiantamentos').insert(row);
       if (error) throw error;
       setAdvValor(''); setAdvDesc('');
       await fetchData();
     } catch (err) {
-      alert('Erro ao lançar adiantamento. Tente novamente.');
+      alert(gerente ? 'Erro ao lançar adiantamento. Tente novamente.' : 'Erro ao enviar o pedido. Tente novamente.');
       console.error(err);
     } finally { setAdvSaving(false); }
+  };
+
+  // Aprovar: o desconto cai na data da aprovação (quando o dinheiro sai), não na data do pedido.
+  const decidir = async (a, status) => {
+    const msg = status === 'aprovado'
+      ? `Aprovar adiantamento de ${fmtBRL(Number(a.valor))} para ${barberNome(a.barbeiro_id)}? Será descontado do repasse.`
+      : `Recusar o pedido de ${fmtBRL(Number(a.valor))} de ${barberNome(a.barbeiro_id)}?`;
+    if (!confirm(msg)) return;
+    try {
+      const { data: upd, error } = await supabase.from('adiantamentos')
+        .update({ status, data: status === 'aprovado' ? hojeStr : a.data, decidido_por: barber.id, decidido_em: new Date().toISOString() })
+        .eq('id', a.id).eq('status', 'pendente').select('id');
+      if (error) throw error;
+      if (!upd?.length) throw new Error('nenhuma linha atualizada (RLS?)');
+      await fetchData();
+    } catch (err) {
+      alert('Erro ao registrar a decisão. Tente novamente.');
+      console.error(err);
+    }
+  };
+
+  const cancelarPedido = async (a) => {
+    if (!confirm(`Cancelar seu pedido de ${fmtBRL(Number(a.valor))}?`)) return;
+    try {
+      const { error } = await supabase.from('adiantamentos').delete().eq('id', a.id).eq('status', 'pendente');
+      if (error) throw error;
+      setPendentes(prev => prev.filter(x => x.id !== a.id));
+    } catch (err) {
+      alert('Erro ao cancelar o pedido.');
+      console.error(err);
+    }
   };
 
   const delAdiantamento = async (a) => {
@@ -967,6 +1042,7 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
       <div className="fat-screen-header">
         <button className="fat-back-btn" onClick={onClose}>‹</button>
         <div className="fat-screen-title">{isAdmin ? 'Caixa da loja' : 'Caixa'}</div>
+        {gerente && pendentes.length > 0 && <span className="status-badge status-cancelado" style={{marginLeft:'0.6rem'}}>{pendentes.length} pedido{pendentes.length!==1?'s':''}</span>}
         <div style={{flex:1}}/>
         <span style={{color:'var(--dim)',fontSize:'0.75rem'}}>
           {today.toLocaleDateString('pt-BR',{day:'numeric',month:'short'})}
@@ -1002,7 +1078,29 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
           <div style={{display:'flex',justifyContent:'center',padding:'3rem'}}><Spinner size={32}/></div>
         ) : !selBarber ? (
           <>
-            {/* ── Visão da loja (admin) ── */}
+            {/* ── Pedidos de adiantamento aguardando (gerente decide, dono só vê) ── */}
+            {pendentes.length > 0 && (
+              <div className="card-block" style={{borderColor:'rgba(245,158,11,0.4)'}}>
+                <div className="card-block-title">Pedidos de adiantamento</div>
+                {pendentes.map(a => (
+                  <div key={a.id} className="adv-row" style={{flexWrap:'wrap'}}>
+                    <span style={{color:'var(--muted)',minWidth:40}}>{fmtDataCurta(a.data)}</span>
+                    <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      <b>{barberNome(a.barbeiro_id)}</b> · {a.descricao || 'Adiantamento'}
+                    </span>
+                    <span style={{fontWeight:600}}>{fmtBRL(Number(a.valor))}</span>
+                    {gerente && (
+                      <div style={{display:'flex',gap:'0.4rem',width:'100%',marginTop:'0.4rem'}}>
+                        <button className="modal-btn modal-btn-green" style={{margin:0}} onClick={() => decidir(a, 'aprovado')}>✓ Aprovar</button>
+                        <button className="modal-btn modal-btn-red" style={{margin:0}} onClick={() => decidir(a, 'recusado')}>✕ Recusar</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Visão da loja (admin/gerente) ── */}
             <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'1.5rem',marginBottom:'1rem',textAlign:'center'}}>
               <div style={{fontSize:'0.7rem',fontWeight:600,letterSpacing:'0.12em',textTransform:'uppercase',color:'var(--dim)',marginBottom:'0.5rem'}}>
                 Loja faturou {periodLabel[period]}
@@ -1095,44 +1193,56 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
                   {fmtBRL(sel.repasse)}
                 </div>
                 <div style={{color:'rgba(74,222,128,0.5)',fontSize:'0.78rem',marginTop:'0.4rem'}}>
-                  {Math.round(pctHoje.semana*100)}% seg–sáb · {Math.round(pctHoje.domingo*100)}% domingos
+                  {pctHoje.semana === 1 && pctHoje.domingo === 1 ? '100% do valor dos atendimentos' : `${Math.round(pctHoje.semana*100)}% seg–sáb · ${Math.round(pctHoje.domingo*100)}% domingos`}
                 </div>
-                {sel.totalAdv > 0 && (
-                  <div style={{marginTop:'0.9rem',paddingTop:'0.8rem',borderTop:'1px solid rgba(74,222,128,0.15)'}}>
-                    <div className="sum-row"><span className="sum-key">Adiantamentos</span><span className="sum-val" style={{color:'var(--red)'}}>− {fmtBRL(sel.totalAdv)}</span></div>
-                    <div className="sum-row"><span className="sum-key" style={{fontWeight:600,color:'var(--text)'}}>{selBarber.id === barber.id ? 'Você recebe' : 'A pagar'}</span><span className="sum-val" style={{fontWeight:700,fontSize:'1rem'}}>{fmtBRL(sel.aReceber)}</span></div>
-                  </div>
-                )}
+                <div style={{marginTop:'0.9rem',paddingTop:'0.8rem',borderTop:'1px solid rgba(74,222,128,0.15)'}}>
+                  <div className="sum-row"><span className="sum-key">Repasse</span><span className="sum-val">{fmtBRL(sel.repasse)}</span></div>
+                  <div className="sum-row"><span className="sum-key">Adiantamentos aprovados</span><span className="sum-val" style={{color:'var(--red)'}}>− {fmtBRL(sel.totalAdv)}</span></div>
+                  <div className="sum-row"><span className="sum-key" style={{fontWeight:600,color:'var(--text)'}}>{selBarber.id === barber.id ? 'Você recebe' : 'A pagar'}</span><span className="sum-val" style={{fontWeight:700,fontSize:'1rem'}}>{fmtBRL(sel.aReceber)}</span></div>
+                </div>
               </div>
             )}
 
-            {(sel.func || sel.advs.length > 0) && (
+            {(sel.func || sel.advs.length > 0 || sel.pend.length > 0) && (
               <div className="card-block">
                 <div className="card-block-title">Adiantamentos {periodLabel[period]}</div>
-                {sel.advs.length === 0 ? (
+                {sel.advs.length === 0 && sel.pend.length === 0 ? (
                   <div style={{textAlign:'center',padding:'0.8rem 0',color:'var(--dim)',fontSize:'0.85rem'}}>Nenhum adiantamento</div>
-                ) : sel.advs.map(a => (
-                  <div key={a.id} className="adv-row">
+                ) : [...sel.pend, ...sel.advs].map(a => (
+                  <div key={a.id} className="adv-row" style={{opacity: a.status === 'recusado' ? 0.55 : 1}}>
                     <span style={{color:'var(--muted)',minWidth:40}}>{fmtDataCurta(a.data)}</span>
                     <span style={{flex:1,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.descricao || 'Adiantamento'}</span>
-                    <span style={{fontWeight:600,color:'var(--red)'}}>− {fmtBRL(Number(a.valor))}</span>
-                    {isAdmin && <button className="adv-del" onClick={() => delAdiantamento(a)} title="Excluir">🗑</button>}
+                    {a.status !== 'aprovado' && (
+                      <span className={`status-badge ${a.status === 'pendente' ? 'status-pendente' : 'status-cancelado'}`}>{a.status === 'pendente' ? 'aguardando' : 'recusado'}</span>
+                    )}
+                    <span style={{fontWeight:600,color: a.status === 'aprovado' ? 'var(--red)' : 'var(--dim)',textDecoration: a.status === 'recusado' ? 'line-through' : 'none'}}>
+                      {a.status === 'aprovado' ? '− ' : ''}{fmtBRL(Number(a.valor))}
+                    </span>
+                    {gerente && a.status === 'pendente' && (
+                      <>
+                        <button className="adv-del" style={{color:'var(--green)'}} onClick={() => decidir(a, 'aprovado')} title="Aprovar">✓</button>
+                        <button className="adv-del" onClick={() => decidir(a, 'recusado')} title="Recusar">✕</button>
+                      </>
+                    )}
+                    {gerente && a.status !== 'pendente' && <button className="adv-del" onClick={() => delAdiantamento(a)} title="Excluir">🗑</button>}
+                    {!isAdmin && a.status === 'pendente' && <button className="adv-del" onClick={() => cancelarPedido(a)} title="Cancelar pedido">✕</button>}
                   </div>
                 ))}
 
-                {isAdmin && (
+                {(gerente || (!isAdmin && selBarber.id === barber.id && sel.func)) && (
                   <div style={{marginTop:'1rem',paddingTop:'1rem',borderTop:'1px solid var(--border)'}}>
-                    <div className="field-label">Lançar adiantamento para {selBarber.nome}</div>
+                    <div className="field-label">{gerente ? `Lançar adiantamento para ${selBarber.nome}` : 'Pedir adiantamento ao gerente'}</div>
                     <div style={{display:'flex',gap:'0.5rem',marginBottom:'0.6rem'}}>
                       <input className="field-input" type="number" inputMode="decimal" min="0" step="0.01" placeholder="Valor (R$)"
                         value={advValor} onChange={e => setAdvValor(e.target.value)} style={{flex:1}} />
-                      <input className="field-input" type="date" value={advData} onChange={e => setAdvData(e.target.value)} style={{flex:1}} />
+                      {gerente && <input className="field-input" type="date" value={advData} onChange={e => setAdvData(e.target.value)} style={{flex:1}} />}
                     </div>
-                    <input className="field-input" type="text" placeholder="Descrição (opcional)" value={advDesc}
+                    <input className="field-input" type="text" placeholder={gerente ? 'Descrição (opcional)' : 'Motivo'} value={advDesc}
                       onChange={e => setAdvDesc(e.target.value)} onKeyDown={e => e.key==='Enter' && addAdiantamento()} style={{marginBottom:'0.6rem'}} />
-                    <button className="btn-gold" onClick={addAdiantamento} disabled={advSaving || !advValor || !advData}>
-                      {advSaving ? <><Spinner size={18} dark/> Salvando...</> : '💸 Lançar adiantamento'}
+                    <button className="btn-gold" onClick={addAdiantamento} disabled={advSaving || !advValor || (gerente && !advData)}>
+                      {advSaving ? <><Spinner size={18} dark/> Salvando...</> : gerente ? '💸 Lançar adiantamento' : '📨 Enviar pedido'}
                     </button>
+                    {!gerente && <div style={{color:'var(--dim)',fontSize:'0.75rem',marginTop:'0.5rem',textAlign:'center'}}>Só é descontado depois que o gerente aprovar.</div>}
                   </div>
                 )}
               </div>
@@ -1164,7 +1274,10 @@ function FaturamentoScreen({ barber, barbeiros = [], onClose }) {
 
 
 // ─── Atendimento Avulso ───────────────────────────────────────────────────────
-function AvulsoTab({ barber }) {
+function AvulsoTab({ barbeiros = [] }) {
+  const hojeStr = toDateStr(today.getDate(), today.getMonth(), today.getFullYear());
+  const [barberId, setBarberId]       = useState(null);
+  const [dataAtend, setDataAtend]     = useState(hojeStr); // gerente pode lançar um dia que já passou
   const [selServices, setSelServices] = useState([]);
   const [clientName, setClientName]   = useState('');
   const [clientPhone, setClientPhone] = useState('');
@@ -1186,7 +1299,8 @@ function AvulsoTab({ barber }) {
   const descontoVal   = Math.min(Number(desconto)||0, subtotal);
   const totalPrice    = subtotal - descontoVal;
   const totalDuration = selServices.reduce((sum,s)=>sum+s.duracao,0);
-  const canConfirm    = selServices.length>0 && clientName;
+  const barber        = barbeiros.find(b => b.id === barberId);
+  const canConfirm    = barber && dataAtend && dataAtend <= hojeStr && selServices.length>0 && clientName;
 
   const handleConfirm = async () => {
     if (!canConfirm || saving) return;
@@ -1194,7 +1308,7 @@ function AvulsoTab({ barber }) {
     try {
       const now     = new Date();
       const pad     = (n) => String(n).padStart(2,'0');
-      const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+      const dateStr = dataAtend;
       const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:00`;
 
       const { data: appt, error: apptErr } = await supabase
@@ -1218,7 +1332,7 @@ function AvulsoTab({ barber }) {
       );
       if (svcsErr) throw svcsErr;
 
-      setSavedData({ clientName, selServices, totalPrice, descontoVal, subtotal });
+      setSavedData({ clientName, selServices, totalPrice, descontoVal, subtotal, barberNome: barber.nome, dataAtend });
       setDone(true);
     } catch (err) {
       alert('Erro ao salvar. Tente novamente.');
@@ -1227,7 +1341,7 @@ function AvulsoTab({ barber }) {
   };
 
   const handleNew = () => {
-    setSelServices([]); setClientName(''); setClientPhone('');
+    setBarberId(null); setDataAtend(hojeStr); setSelServices([]); setClientName(''); setClientPhone('');
     setDesconto(''); setDone(false); setSavedData(null);
   };
 
@@ -1236,7 +1350,7 @@ function AvulsoTab({ barber }) {
       <div className="success-check">⚡</div>
       <div style={{fontWeight:700,fontSize:'1.2rem',marginBottom:'0.3rem'}}>Registrado!</div>
       <div style={{color:'var(--muted)',fontSize:'0.88rem',marginBottom:'1.5rem'}}>
-        {savedData.clientName} · já no caixa
+        {savedData.clientName} · ✂️ {savedData.barberNome} · {savedData.dataAtend.split('-').reverse().join('/')} · já no caixa
       </div>
       <div className="summary-block" style={{textAlign:'left',maxWidth:320,margin:'0 auto 1.5rem'}}>
         {savedData.selServices.map(s=>(
@@ -1262,6 +1376,13 @@ function AvulsoTab({ barber }) {
 
   return (
     <div>
+      <BarberPicker barbeiros={barbeiros} value={barberId} onChange={setBarberId} />
+
+      <div className="card-block">
+        <div className="card-block-title">Data do atendimento</div>
+        <input className="field-input" type="date" max={hojeStr} value={dataAtend} onChange={e => setDataAtend(e.target.value)} />
+      </div>
+
       {/* Serviços */}
       <div className="card-block">
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.9rem'}}>
@@ -1319,6 +1440,8 @@ function AvulsoTab({ barber }) {
               <span className="sum-val">R$ {Number(s.preco).toFixed(0)}</span>
             </div>
           ))}
+          <div className="sum-row"><span className="sum-key">Barbeiro</span><span className="sum-val">{barber?.nome ?? '—'}</span></div>
+          <div className="sum-row"><span className="sum-key">Data</span><span className="sum-val">{dataAtend ? dataAtend.split('-').reverse().join('/') : '—'}</span></div>
           {descontoVal>0 && (
             <>
               <div className="sum-row"><span className="sum-key">Subtotal</span><span className="sum-val">R$ {subtotal},00</span></div>
@@ -1342,13 +1465,16 @@ function AvulsoTab({ barber }) {
 function Dashboard({ barber, onLogout }) {
   const [tab, setTab]       = useState('agenda');
   const [showFat, setShowFat] = useState(false);
-  const [barbeiros, setBarbeiros] = useState([]); // só o admin carrega (RLS libera a leitura de todos)
+  const [barbeiros, setBarbeiros] = useState([]); // só admin/gerente carregam (RLS libera a leitura de todos)
+  const gerente = isGerente(barber);
+  const todos   = veTodos(barber);
 
   useEffect(() => {
-    if (!barber.admin) return;
-    supabase.from('barbeiros').select('id, nome, email, avatar, cor').order('nome')
-      .then(({ data }) => setBarbeiros(data ?? []));
-  }, [barber.admin]);
+    if (!todos) return;
+    // O gerente não corta cabelo: fica fora das listas de barbeiros.
+    supabase.from('barbeiros').select('id, nome, email, avatar, cor, gerente').order('nome')
+      .then(({ data }) => setBarbeiros((data ?? []).filter(b => !b.gerente)));
+  }, [todos]);
 
   const handleLogout = async () => { await supabase.auth.signOut(); onLogout(); };
 
@@ -1364,18 +1490,21 @@ function Dashboard({ barber, onLogout }) {
         </div>
       </div>
       <div className="greeting">
-        <div className="greeting-name">Olá, {barber.nome} {barber.admin ? '👑' : '✂️'}</div>
+        <div className="greeting-name">Olá, {barber.nome} {barber.admin ? '👑' : gerente ? '📋' : '✂️'}</div>
         <div className="greeting-sub">{today.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})}</div>
       </div>
-      <div className="tabs">
-        <button className={`tab-btn ${tab==='agenda'?'active':''}`}  onClick={()=>setTab('agenda')}>📅 Agenda</button>
-        <button className={`tab-btn ${tab==='novo'?'active':''}`}    onClick={()=>setTab('novo')}>+ Novo</button>
-        <button className={`tab-btn ${tab==='avulso'?'active':''}`}  onClick={()=>setTab('avulso')}>⚡ Atend.</button>
-      </div>
+      {/* Só o gerente lança agendamentos e atendimentos; os demais só consultam a agenda. */}
+      {gerente && (
+        <div className="tabs">
+          <button className={`tab-btn ${tab==='agenda'?'active':''}`}  onClick={()=>setTab('agenda')}>📅 Agenda</button>
+          <button className={`tab-btn ${tab==='novo'?'active':''}`}    onClick={()=>setTab('novo')}>+ Novo</button>
+          <button className={`tab-btn ${tab==='avulso'?'active':''}`}  onClick={()=>setTab('avulso')}>⚡ Atend.</button>
+        </div>
+      )}
       <div className="tab-content">
-        {tab==='agenda' ? <AgendaTab barber={barber} barbeiros={barbeiros}/>
-          : tab==='novo' ? <NovoAgendamentoTab barber={barber}/>
-          : <AvulsoTab barber={barber}/>}
+        {!gerente || tab==='agenda' ? <AgendaTab barber={barber} barbeiros={barbeiros}/>
+          : tab==='novo' ? <NovoAgendamentoTab barbeiros={barbeiros}/>
+          : <AvulsoTab barbeiros={barbeiros}/>}
       </div>
     </div>
   );
